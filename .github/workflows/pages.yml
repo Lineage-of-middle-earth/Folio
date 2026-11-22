@@ -25,7 +25,7 @@ jobs:
       - run: npm install --legacy-peer-deps --no-audit --no-fund
       - run: npm run build
         env:
-          VITE_BASE: /Folio/
+          VITE_BASE: /
       - run: cp dist/index.html dist/404.html
       - uses: actions/upload-pages-artifact@v3
         with:
