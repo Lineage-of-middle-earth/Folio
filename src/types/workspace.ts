@@ -69,14 +69,37 @@ export type WorkspaceArea =
   | 'overview'
   | 'daily-planner'
   | 'project'
+  | 'folder-group'
+  | 'standalone-page'
   | 'sync-hub'
   | 'drive-browser';
+
+export interface ProjectFolderGroup {
+  id: string;
+  name: string;
+  icon: string;
+  createdAt: string;
+}
+
+export interface StandalonePage {
+  id: string;
+  title: string;
+  icon: string;
+  coverUrl: string | null;
+  docUrl: string;
+  parentDocId?: string | null;
+  blocks: DocBlock[];
+  dirty: boolean;
+  lastSyncedAt: string | null;
+  modifiedTime?: string;
+}
 
 export interface DailyTaskItem {
   id: string;
   date: string; // YYYY-MM-DD
   title: string;
   completed: boolean;
+  starred?: boolean;
   tag: string; // 'Work' | 'Personal' | custom tag
   time?: string;
   createdAt: string;
@@ -87,12 +110,21 @@ export interface DailyHabitItem {
   title: string;
   category: string; // 'Work' | 'Personal' | custom
   completedDates: Record<string, boolean>; // YYYY-MM-DD -> true
+  starredDates?: Record<string, boolean>; // YYYY-MM-DD -> true
+}
+
+export interface DailyHighlightItem {
+  id: string;
+  date: string; // YYYY-MM-DD
+  text: string;
+  createdAt: string;
 }
 
 export interface DailyPlannerState {
   tasksByDate: Record<string, DailyTaskItem[]>;
   notesByDate: Record<string, string>;
   ideasByDate?: Record<string, string>;
+  highlightsByDate?: Record<string, DailyHighlightItem[]>;
   habits: DailyHabitItem[];
   customTags: string[];
   tagColors?: Record<string, string>;
@@ -103,6 +135,7 @@ export interface ProjectWorkspace {
   title: string;
   icon: string;
   coverUrl: string | null;
+  groupId?: string | null;
   driveFolderId: string | null;
   driveFolderName: string | null;
   driveFolderUrl: string | null;

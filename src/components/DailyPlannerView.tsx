@@ -7,11 +7,13 @@ import {
   Maximize2,
   Minimize2,
   Plus,
+  Star,
   Trash2,
   X,
 } from 'lucide-react';
 import {
   DailyHabitItem,
+  DailyHighlightItem,
   DailyPlannerState,
   DailyTaskItem,
 } from '../types/workspace';
@@ -183,6 +185,14 @@ function formatFullDate(dateKey: string): string {
   });
 }
 
+function formatShortDate(dateKey: string): string {
+  const dt = parseDateKey(dateKey);
+  return dt.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 function calculateHabitStreak(
   completedDates: Record<string, boolean>,
   referenceDateKey: string
@@ -235,6 +245,7 @@ function createInitialPlannerState(todayKey: string): DailyPlannerState {
           date: todayKey,
           title: 'Review today’s key priorities',
           completed: true,
+          starred: true,
           tag: 'Work',
           createdAt: new Date().toISOString(),
         },
@@ -243,6 +254,7 @@ function createInitialPlannerState(todayKey: string): DailyPlannerState {
           date: todayKey,
           title: 'Complete deep work session',
           completed: false,
+          starred: false,
           tag: 'Focus',
           createdAt: new Date().toISOString(),
         },
@@ -251,6 +263,7 @@ function createInitialPlannerState(todayKey: string): DailyPlannerState {
           date: todayKey,
           title: 'Evening walk & recharge',
           completed: false,
+          starred: false,
           tag: 'Personal',
           createdAt: new Date().toISOString(),
         },
@@ -258,6 +271,7 @@ function createInitialPlannerState(todayKey: string): DailyPlannerState {
     },
     notesByDate: {},
     ideasByDate: {},
+    highlightsByDate: {},
     habits: [
       {
         id: uid('habit'),
@@ -267,6 +281,7 @@ function createInitialPlannerState(todayKey: string): DailyPlannerState {
           [yesterdayKey]: true,
           [todayKey]: true,
         },
+        starredDates: {},
       },
       {
         id: uid('habit'),
@@ -275,6 +290,7 @@ function createInitialPlannerState(todayKey: string): DailyPlannerState {
         completedDates: {
           [yesterdayKey]: true,
         },
+        starredDates: {},
       },
       {
         id: uid('habit'),
@@ -284,15 +300,27 @@ function createInitialPlannerState(todayKey: string): DailyPlannerState {
           [yesterdayKey]: true,
           [todayKey]: true,
         },
+        starredDates: {},
       },
       {
         id: uid('habit'),
         title: 'Read 20 pages',
         category: 'Personal',
         completedDates: {},
+        starredDates: {},
       },
     ],
   };
+}
+
+export interface StarredEntry {
+  id: string;
+  dateKey: string;
+  kind: 'task' | 'habit' | 'realization';
+  title: string;
+  tagOrSub?: string;
+  completed?: boolean;
+  sourceId: string;
 }
 
 export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
@@ -319,6 +347,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
             tasksByDate: parsed.tasksByDate || {},
             notesByDate: sanitizeLegacyNotes(parsed.notesByDate),
             ideasByDate: parsed.ideasByDate || {},
+            highlightsByDate: parsed.highlightsByDate || {},
             habits: parsed.habits || [],
             customTags: parsed.customTags || ['Focus'],
             tagColors: parsed.tagColors || {
@@ -345,6 +374,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
 
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskTag, setNewTaskTag] = useState<string>('Work');
+  const [newTaskStarred, setNewTaskStarred] = useState<boolean>(false);
   const [activeTagFilter, setActiveTagFilter] = useState<string>('All');
 
   const [showCustomTagInput, setShowCustomTagInput] = useState(false);
@@ -353,6 +383,10 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
 
   const [newHabitTitle, setNewHabitTitle] = useState('');
   const [showNewHabitInput, setShowNewHabitInput] = useState(false);
+
+  const [newHighlightText, setNewHighlightText] = useState('');
+  const [showAllStarredList, setShowAllStarredList] = useState(false);
+  const [starredListScope, setStarredListScope] = useState<'all' | 'selected'>('all');
 
   const allTags = useMemo(() => {
     const merged = [...DEFAULT_TAGS];
@@ -369,8 +403,16 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     [planner.tasksByDate, selectedDate]
   );
 
+  const highlightsForSelectedDate = useMemo(
+    () => (planner.highlightsByDate || {})[selectedDate] || [],
+    [planner.highlightsByDate, selectedDate]
+  );
+
   const filteredTasks = useMemo(() => {
     if (activeTagFilter === 'All') return tasksForSelectedDate;
+    if (activeTagFilter === '__starred__') {
+      return tasksForSelectedDate.filter((t) => Boolean(t.starred));
+    }
     return tasksForSelectedDate.filter(
       (t) => t.tag.toLowerCase() === activeTagFilter.toLowerCase()
     );
@@ -388,6 +430,81 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     () => planner.habits.filter((h) => Boolean(h.completedDates[selectedDate])).length,
     [planner.habits, selectedDate]
   );
+
+  // Aggregate all starred items across all dates (tasks, habits, realizations)
+  const allStarredEntries = useMemo<StarredEntry[]>(() => {
+    const list: StarredEntry[] = [];
+
+    // 1. Starred tasks across all dates
+    for (const [dateKey, tasks] of Object.entries(planner.tasksByDate)) {
+      for (const t of tasks || []) {
+        if (t.starred) {
+          list.push({
+            id: `task_${t.id}`,
+            dateKey,
+            kind: 'task',
+            title: t.title,
+            tagOrSub: t.tag,
+            completed: t.completed,
+            sourceId: t.id,
+          });
+        }
+      }
+    }
+
+    // 2. Starred habits on specific dates
+    for (const h of planner.habits) {
+      for (const [dateKey, isStarred] of Object.entries(h.starredDates || {})) {
+        if (isStarred) {
+          list.push({
+            id: `habit_${h.id}_${dateKey}`,
+            dateKey,
+            kind: 'habit',
+            title: h.title,
+            tagOrSub: 'Habit',
+            completed: Boolean(h.completedDates[dateKey]),
+            sourceId: h.id,
+          });
+        }
+      }
+    }
+
+    // 3. Starred realizations / highlights
+    for (const [dateKey, highlights] of Object.entries(
+      planner.highlightsByDate || {}
+    )) {
+      for (const hl of highlights || []) {
+        list.push({
+          id: `hl_${hl.id}`,
+          dateKey,
+          kind: 'realization',
+          title: hl.text,
+          tagOrSub: 'Realization',
+          completed: true,
+          sourceId: hl.id,
+        });
+      }
+    }
+
+    return list.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  }, [planner.tasksByDate, planner.habits, planner.highlightsByDate]);
+
+  // Fast lookup map of dateKey -> number of starred items on that day
+  const starredCountByDate = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const entry of allStarredEntries) {
+      map[entry.dateKey] = (map[entry.dateKey] || 0) + 1;
+    }
+    return map;
+  }, [allStarredEntries]);
+
+  const selectedDateStarredEntries = useMemo(
+    () => allStarredEntries.filter((e) => e.dateKey === selectedDate),
+    [allStarredEntries, selectedDate]
+  );
+
+  const displayedStarredEntries =
+    starredListScope === 'selected' ? selectedDateStarredEntries : allStarredEntries;
 
   const calendarDays = useMemo(() => {
     const { year, month } = visibleMonth;
@@ -463,6 +580,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
       date: selectedDate,
       title: cleanTitle,
       completed: false,
+      starred: newTaskStarred,
       tag: newTaskTag || 'Work',
       createdAt: new Date().toISOString(),
     };
@@ -475,6 +593,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
       },
     }));
     setNewTaskTitle('');
+    setNewTaskStarred(false);
   };
 
   const toggleTaskCompleted = (taskId: string) => {
@@ -484,6 +603,18 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
         ...prev.tasksByDate,
         [selectedDate]: (prev.tasksByDate[selectedDate] || []).map((t) =>
           t.id === taskId ? { ...t, completed: !t.completed } : t
+        ),
+      },
+    }));
+  };
+
+  const toggleTaskStarred = (taskId: string, dateKey = selectedDate) => {
+    setPlanner((prev) => ({
+      ...prev,
+      tasksByDate: {
+        ...prev.tasksByDate,
+        [dateKey]: (prev.tasksByDate[dateKey] || []).map((t) =>
+          t.id === taskId ? { ...t, starred: !t.starred } : t
         ),
       },
     }));
@@ -557,6 +688,22 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     }));
   };
 
+  const toggleHabitStarredOnDate = (habitId: string, dateKey: string) => {
+    setPlanner((prev) => ({
+      ...prev,
+      habits: prev.habits.map((h) => {
+        if (h.id !== habitId) return h;
+        const nextStarred = { ...(h.starredDates || {}) };
+        if (nextStarred[dateKey]) {
+          delete nextStarred[dateKey];
+        } else {
+          nextStarred[dateKey] = true;
+        }
+        return { ...h, starredDates: nextStarred };
+      }),
+    }));
+  };
+
   const handleAddHabit = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = newHabitTitle.trim();
@@ -566,6 +713,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
       title: clean,
       category: 'Daily',
       completedDates: {},
+      starredDates: {},
     };
     setPlanner((prev) => ({
       ...prev,
@@ -580,6 +728,51 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
       ...prev,
       habits: prev.habits.filter((h) => h.id !== habitId),
     }));
+  };
+
+  const handleAddHighlight = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newHighlightText.trim();
+    if (!clean) return;
+    const item: DailyHighlightItem = {
+      id: uid('hl'),
+      date: selectedDate,
+      text: clean,
+      createdAt: new Date().toISOString(),
+    };
+    setPlanner((prev) => ({
+      ...prev,
+      highlightsByDate: {
+        ...(prev.highlightsByDate || {}),
+        [selectedDate]: [
+          ...((prev.highlightsByDate || {})[selectedDate] || []),
+          item,
+        ],
+      },
+    }));
+    setNewHighlightText('');
+  };
+
+  const removeHighlight = (highlightId: string, dateKey: string) => {
+    setPlanner((prev) => ({
+      ...prev,
+      highlightsByDate: {
+        ...(prev.highlightsByDate || {}),
+        [dateKey]: ((prev.highlightsByDate || {})[dateKey] || []).filter(
+          (h) => h.id !== highlightId
+        ),
+      },
+    }));
+  };
+
+  const handleUnstarEntry = (entry: StarredEntry) => {
+    if (entry.kind === 'task') {
+      toggleTaskStarred(entry.sourceId, entry.dateKey);
+    } else if (entry.kind === 'habit') {
+      toggleHabitStarredOnDate(entry.sourceId, entry.dateKey);
+    } else if (entry.kind === 'realization') {
+      removeHighlight(entry.sourceId, entry.dateKey);
+    }
   };
 
   const handleNotesChange = (value: string) => {
@@ -603,6 +796,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
   };
 
   const selectedNewTaskTheme = getTagColorTheme(newTaskTag, planner.tagColors);
+  const selectedDayHasStar = Boolean(starredCountByDate[selectedDate]);
 
   return (
     <div
@@ -615,15 +809,52 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
       {/* Minimal Header */}
       <div className="flex flex-wrap items-baseline justify-between gap-4 border-b border-neutral-200/80 pb-5 dark:border-neutral-800">
         <div>
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50 sm:text-3xl">
-            {formatFullDate(selectedDate)}
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50 sm:text-3xl">
+              {formatFullDate(selectedDate)}
+            </h1>
+            {selectedDayHasStar && (
+              <span
+                className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300"
+                title="This day has starred important items or realizations"
+              >
+                <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                <span className="tabular-nums">
+                  {starredCountByDate[selectedDate]} starred
+                </span>
+              </span>
+            )}
+          </div>
           <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
             {selectedDate === todayKey ? 'Today' : selectedDate} · Local planner (not synced with Google Calendar)
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Toggle All Starred / Important List */}
+          <button
+            type="button"
+            onClick={() => setShowAllStarredList((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+              showAllStarredList
+                ? 'border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-600 dark:bg-amber-950/60 dark:text-amber-200'
+                : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800'
+            }`}
+            title="View list of all starred tasks, habits, and realizations"
+          >
+            <Star
+              className={`h-3.5 w-3.5 ${
+                allStarredEntries.length > 0
+                  ? 'fill-amber-400 text-amber-500'
+                  : 'text-neutral-400'
+              }`}
+            />
+            <span>Important & Starred</span>
+            <span className="rounded bg-amber-100/80 px-1.5 py-0.2 font-mono text-[11px] tabular-nums text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+              {allStarredEntries.length}
+            </span>
+          </button>
+
           <button
             type="button"
             onClick={() => selectDateAndSyncMonth(addDays(selectedDate, -1))}
@@ -671,6 +902,147 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
         </div>
       </div>
 
+      {/* Expandable Starred & Important List Drawer across All Days */}
+      <AnimatePresence initial={false}>
+        {showAllStarredList && (
+          <motion.section
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18 }}
+            className="mt-6 rounded-xl border border-amber-200/90 bg-amber-50/40 p-4 dark:border-amber-900/50 dark:bg-amber-950/20"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
+                <h2 className="font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  Important Realizations, Tasks & Habits
+                </h2>
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                  · Click any item to jump to that date on the calendar
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <div className="flex rounded-lg border border-neutral-200 bg-white p-0.5 text-xs dark:border-neutral-800 dark:bg-[#191918]">
+                  <button
+                    type="button"
+                    onClick={() => setStarredListScope('all')}
+                    className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+                      starredListScope === 'all'
+                        ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                        : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400'
+                    }`}
+                  >
+                    All Dates ({allStarredEntries.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStarredListScope('selected')}
+                    className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+                      starredListScope === 'selected'
+                        ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                        : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400'
+                    }`}
+                  >
+                    {formatShortDate(selectedDate)} ({selectedDateStarredEntries.length})
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAllStarredList(false)}
+                  className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-200/60 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                  aria-label="Close starred list"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Add Realization / Milestone for Selected Date */}
+            <form onSubmit={handleAddHighlight} className="mt-3 flex items-center gap-2">
+              <input
+                type="text"
+                value={newHighlightText}
+                onChange={(e) => setNewHighlightText(e.target.value)}
+                placeholder={`Star something you realized or achieved on ${formatShortDate(selectedDate)}...`}
+                className="flex-1 rounded-lg border border-amber-200/90 bg-white px-3 py-1.5 text-xs text-neutral-900 outline-none focus:border-amber-400 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-100"
+              />
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 whitespace-nowrap shrink-0"
+              >
+                <Star className="h-3 w-3 fill-white" />
+                <span>Add Starred Note</span>
+              </button>
+            </form>
+
+            {displayedStarredEntries.length === 0 ? (
+              <p className="py-5 text-center text-xs text-neutral-500 dark:text-neutral-400">
+                No starred items yet. Click the ★ icon next to any task or habit—or add a realization above—to mark it on the calendar.
+              </p>
+            ) : (
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {displayedStarredEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    onClick={() => selectDateAndSyncMonth(entry.dateKey)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        selectDateAndSyncMonth(entry.dateKey);
+                      }
+                    }}
+                    className={`group flex cursor-pointer items-center justify-between gap-2.5 rounded-lg border bg-white px-3 py-2 text-left transition-colors hover:border-amber-300 dark:bg-[#191918] ${
+                      entry.dateKey === selectedDate
+                        ? 'border-amber-300/90 dark:border-amber-700/70'
+                        : 'border-neutral-200/80 dark:border-neutral-800'
+                    }`}
+                  >
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-medium text-neutral-900 dark:text-neutral-100">
+                          {entry.title}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-neutral-400">
+                          <span className="font-mono tabular-nums text-amber-700 dark:text-amber-400">
+                            {formatShortDate(entry.dateKey)}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span className="capitalize">{entry.kind}</span>
+                          {entry.tagOrSub && entry.kind === 'task' && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>{entry.tagOrSub}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleUnstarEntry(entry);
+                      }}
+                      className="rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-neutral-800"
+                      title="Remove star"
+                      aria-label="Remove star"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.section>
+        )}
+      </AnimatePresence>
+
       {/* Calm Two-Column Workspace */}
       <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-12">
         {/* Left Column: Calendar + Daily Habits directly below the Calendar */}
@@ -713,6 +1085,8 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               {calendarDays.map((cell) => {
                 const isSelected = cell.dateKey === selectedDate;
                 const isToday = cell.dateKey === todayKey;
+                const starCount = starredCountByDate[cell.dateKey] || 0;
+                const hasStar = starCount > 0;
                 const hasActivity =
                   (planner.tasksByDate[cell.dateKey]?.length || 0) > 0 ||
                   Boolean(planner.notesByDate[cell.dateKey]?.trim()) ||
@@ -724,6 +1098,11 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                     key={cell.dateKey}
                     type="button"
                     onClick={() => selectDateAndSyncMonth(cell.dateKey)}
+                    title={
+                      hasStar
+                        ? `${cell.dateKey} · ${starCount} starred item${starCount > 1 ? 's' : ''}`
+                        : cell.dateKey
+                    }
                     className={`relative flex h-9 flex-col items-center justify-center rounded-md font-mono text-xs tabular-nums transition-colors ${
                       isSelected
                         ? 'bg-neutral-900 font-semibold text-white dark:bg-blue-600'
@@ -734,11 +1113,25 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                         : 'text-neutral-400/70 dark:text-neutral-600'
                     }`}
                   >
+                    {/* Small Star on Calendar Cell when day has important/starred item */}
+                    {hasStar && (
+                      <Star
+                        className={`absolute right-0.5 top-0.5 h-2.5 w-2.5 ${
+                          isSelected
+                            ? 'fill-amber-300 text-amber-300'
+                            : 'fill-amber-400 text-amber-500'
+                        }`}
+                      />
+                    )}
                     <span>{cell.dayNumber}</span>
                     {hasActivity && (
                       <span
                         className={`mt-0.5 h-1 w-1 rounded-full ${
-                          isSelected
+                          hasStar
+                            ? isSelected
+                              ? 'bg-amber-300'
+                              : 'bg-amber-500'
+                            : isSelected
                             ? 'bg-white'
                             : 'bg-neutral-400 dark:bg-neutral-500'
                         }`}
@@ -749,7 +1142,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               })}
             </div>
 
-            {/* Quiet 1-line Summary */}
+            {/* Quiet 1-line Summary with Starred Count */}
             <div className="mt-4 flex items-center justify-between border-t border-neutral-200/80 pt-3 text-xs text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
               <span className="tabular-nums">
                 {completedTasksCount}/{tasksForSelectedDate.length} tasks
@@ -758,6 +1151,15 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               <span className="tabular-nums">
                 {completedHabitsCount}/{planner.habits.length} habits
               </span>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={() => setShowAllStarredList((v) => !v)}
+                className="inline-flex items-center gap-1 font-medium text-amber-700 hover:underline dark:text-amber-400"
+              >
+                <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                <span className="tabular-nums">{allStarredEntries.length} starred</span>
+              </button>
             </div>
           </div>
 
@@ -825,6 +1227,9 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               ) : (
                 planner.habits.map((habit) => {
                   const isChecked = Boolean(habit.completedDates[selectedDate]);
+                  const isStarredToday = Boolean(
+                    (habit.starredDates || {})[selectedDate]
+                  );
                   const streak = calculateHabitStreak(
                     habit.completedDates,
                     selectedDate
@@ -879,6 +1284,30 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
+                            toggleHabitStarredOnDate(habit.id, selectedDate);
+                          }}
+                          className={`rounded p-0.5 transition-opacity ${
+                            isStarredToday
+                              ? 'text-amber-500 opacity-100'
+                              : 'text-neutral-400 opacity-0 hover:text-amber-500 group-hover:opacity-100'
+                          }`}
+                          title={
+                            isStarredToday
+                              ? 'Starred as important today (click to unstar)'
+                              : 'Star this habit for today'
+                          }
+                          aria-label={`Star ${habit.title}`}
+                        >
+                          <Star
+                            className={`h-3.5 w-3.5 ${
+                              isStarredToday ? 'fill-amber-400 text-amber-500' : ''
+                            }`}
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             deleteHabit(habit.id);
                           }}
                           className="rounded p-0.5 text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100"
@@ -893,6 +1322,68 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                 })
               )}
             </div>
+          </section>
+
+          {/* 3. Starred Realizations & Highlights on Selected Day (Compact Card below Habits) */}
+          <section className="rounded-xl border border-neutral-200/90 bg-white p-4 dark:border-neutral-800 dark:bg-[#20201E]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" />
+                <h2 className="font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  Realized / Important
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAllStarredList(true)}
+                className="text-xs font-medium text-amber-700 hover:underline dark:text-amber-400"
+              >
+                View all ({allStarredEntries.length})
+              </button>
+            </div>
+
+            <form onSubmit={handleAddHighlight} className="mt-2.5 flex items-center gap-1.5">
+              <input
+                type="text"
+                value={newHighlightText}
+                onChange={(e) => setNewHighlightText(e.target.value)}
+                placeholder="Star a realization or win for today..."
+                className="min-w-0 flex-1 rounded-lg border border-neutral-200 bg-[#F8F8F7] px-2.5 py-1.5 text-xs text-neutral-900 outline-none focus:border-amber-400 focus:bg-white dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-100"
+              />
+              <button
+                type="submit"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white hover:bg-amber-600"
+                title="Star and save"
+              >
+                <Star className="h-3.5 w-3.5 fill-white" />
+              </button>
+            </form>
+
+            {selectedDateStarredEntries.length > 0 && (
+              <div className="mt-2.5 space-y-1.5">
+                {selectedDateStarredEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="group flex items-center justify-between gap-2 rounded-lg border border-amber-200/70 bg-amber-50/40 px-2.5 py-1.5 text-xs dark:border-amber-900/40 dark:bg-amber-950/20"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-500" />
+                      <span className="truncate font-medium text-neutral-800 dark:text-neutral-100">
+                        {entry.title}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleUnstarEntry(entry)}
+                      className="rounded p-0.5 text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100"
+                      title="Unstar"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
 
@@ -910,7 +1401,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                 </span>
               </div>
 
-              {/* Colored Tag Filter Tabs + Icon-Only [+] Button */}
+              {/* Colored Tag Filter Tabs + Starred Filter + Icon-Only [+] Button */}
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
@@ -922,6 +1413,29 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                   }`}
                 >
                   All
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveTagFilter((curr) =>
+                      curr === '__starred__' ? 'All' : '__starred__'
+                    )
+                  }
+                  className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                    activeTagFilter === '__starred__'
+                      ? 'bg-amber-500 text-white shadow-xs'
+                      : 'bg-amber-50/80 text-amber-800 hover:bg-amber-100/80 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50'
+                  }`}
+                  title="Filter to starred important tasks"
+                >
+                  <Star
+                    className={`h-3 w-3 ${
+                      activeTagFilter === '__starred__'
+                        ? 'fill-white text-white'
+                        : 'fill-amber-400 text-amber-500'
+                    }`}
+                  />
+                  <span>Starred</span>
                 </button>
                 {allTags.map((tagOption) => {
                   const active = activeTagFilter === tagOption;
@@ -1023,15 +1537,33 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               )}
             </AnimatePresence>
 
-            {/* Simple Single-Line Task Input with Colored Tag Selector */}
+            {/* Simple Single-Line Task Input with Star Toggle & Colored Tag Selector */}
             <form onSubmit={handleAddTask} className="flex items-center gap-2">
-              <input
-                type="text"
-                value={newTaskTitle}
-                onChange={(e) => setNewTaskTitle(e.target.value)}
-                placeholder="Add a task and press Enter..."
-                className="flex-1 rounded-lg border border-neutral-200 bg-[#F8F8F7] px-3.5 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-neutral-400 focus:bg-white dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-100"
-              />
+              <div className="relative flex flex-1 items-center">
+                <input
+                  type="text"
+                  value={newTaskTitle}
+                  onChange={(e) => setNewTaskTitle(e.target.value)}
+                  placeholder="Add a task and press Enter..."
+                  className="w-full rounded-lg border border-neutral-200 bg-[#F8F8F7] py-2 pl-3.5 pr-9 text-sm text-neutral-900 outline-none transition-colors focus:border-neutral-400 focus:bg-white dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setNewTaskStarred((s) => !s)}
+                  className="absolute right-2.5 rounded p-1 text-neutral-400 hover:text-amber-500"
+                  title={
+                    newTaskStarred
+                      ? 'Marked as important (★ on calendar)'
+                      : 'Mark as important (★ on calendar)'
+                  }
+                >
+                  <Star
+                    className={`h-4 w-4 ${
+                      newTaskStarred ? 'fill-amber-400 text-amber-500' : ''
+                    }`}
+                  />
+                </button>
+              </div>
               <select
                 value={newTaskTag}
                 onChange={(e) => {
@@ -1068,7 +1600,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               </button>
             </form>
 
-            {/* Clean Task Rows with Colored Tag Selector */}
+            {/* Clean Task Rows with Star Button & Colored Tag Selector */}
             <div className="divide-y divide-neutral-100 dark:divide-neutral-800/70">
               {filteredTasks.length === 0 ? (
                 <p className="py-6 text-center text-xs text-neutral-400">
@@ -1110,6 +1642,27 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                       </div>
 
                       <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleTaskStarred(task.id)}
+                          className={`rounded p-1 transition-opacity ${
+                            task.starred
+                              ? 'text-amber-500 opacity-100'
+                              : 'text-neutral-400 opacity-0 hover:text-amber-500 group-hover:opacity-100'
+                          }`}
+                          title={
+                            task.starred
+                              ? 'Important / Starred (appears on calendar)'
+                              : 'Mark as important (★ on calendar)'
+                          }
+                          aria-label="Star task"
+                        >
+                          <Star
+                            className={`h-3.5 w-3.5 ${
+                              task.starred ? 'fill-amber-400 text-amber-500' : ''
+                            }`}
+                          />
+                        </button>
                         <select
                           value={task.tag}
                           onChange={(e) =>

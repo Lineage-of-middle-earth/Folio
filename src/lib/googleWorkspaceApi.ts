@@ -3,6 +3,7 @@ import {
   DriveFileItem,
   ProjectDocPage,
   ProjectWorkspace,
+  StandalonePage,
   TaskDocTemplate,
   TaskItem,
   TaskPriority,
@@ -263,6 +264,19 @@ export async function trashDriveFile(token: string, fileId: string): Promise<voi
     {
       method: 'PATCH',
       body: JSON.stringify({ trashed: true }),
+    }
+  );
+}
+
+export async function permanentlyDeleteDriveFile(
+  token: string,
+  fileId: string
+): Promise<void> {
+  await workspaceFetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`,
+    token,
+    {
+      method: 'DELETE',
     }
   );
 }
@@ -998,6 +1012,96 @@ export async function createTaskDocument(
     documentUrl: created.documentUrl,
     docTitle,
   };
+}
+
+export async function createStandaloneWorkspacePage(
+  token: string,
+  options: {
+    title: string;
+    icon?: string;
+    rootFolderId: string | null;
+    blocks: DocBlock[];
+    parentDocId?: string | null;
+  }
+): Promise<StandalonePage> {
+  const docTitle = options.title.trim() || 'Untitled Page';
+  const appProps: Record<string, string> = {
+    folioStandalonePage: 'true',
+    folioIcon: options.icon || '📄',
+  };
+  if (options.parentDocId) {
+    appProps.folioParentDocId = options.parentDocId;
+  }
+
+  const created = await createProjectDocument(
+    token,
+    docTitle,
+    options.rootFolderId,
+    options.blocks,
+    appProps
+  );
+
+  return {
+    id: created.documentId,
+    title: docTitle,
+    icon: options.icon || '📄',
+    coverUrl: null,
+    docUrl: created.documentUrl,
+    parentDocId: options.parentDocId || null,
+    blocks: options.blocks,
+    dirty: false,
+    lastSyncedAt: new Date().toISOString(),
+    modifiedTime: new Date().toISOString(),
+  };
+}
+
+export async function discoverStandaloneWorkspacePages(
+  token: string,
+  rootFolderId: string
+): Promise<StandalonePage[]> {
+  const children = await listFolderFiles(token, rootFolderId);
+  const docFiles = children.filter(
+    (f) => f.mimeType === 'application/vnd.google-apps.document'
+  );
+
+  const pages: StandalonePage[] = [];
+  for (let i = 0; i < docFiles.length; i++) {
+    const file = docFiles[i];
+    let blocks: DocBlock[] = [];
+    let docTitle = file.name;
+    let docUrl =
+      file.webViewLink || `https://docs.google.com/document/d/${file.id}/edit`;
+
+    try {
+      const docData = await fetchDocBlocks(token, file.id);
+      blocks = docData.blocks;
+      docTitle = docData.docTitle;
+      docUrl = docData.docUrl;
+    } catch (err) {
+      console.warn(`Could not load standalone page ${file.id}`, err);
+    }
+
+    pages.push({
+      id: file.id,
+      title: docTitle,
+      icon: file.appProperties?.folioIcon || ['📄', '📝', '📌', '💡', '📑'][i % 5],
+      coverUrl: null,
+      docUrl,
+      parentDocId: file.appProperties?.folioParentDocId || null,
+      blocks:
+        blocks.length > 0
+          ? blocks
+          : [
+              { id: uid('blk'), type: 'h1', content: docTitle },
+              { id: uid('blk'), type: 'paragraph', content: '' },
+            ],
+      dirty: false,
+      lastSyncedAt: new Date().toISOString(),
+      modifiedTime: file.modifiedTime,
+    });
+  }
+
+  return pages;
 }
 
 // ============================================================================

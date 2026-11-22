@@ -15,14 +15,20 @@ import { searchDriveFiles } from '../lib/googleWorkspaceApi';
 
 interface DriveBrowserViewProps {
   token: string | null;
+  isGuestMode?: boolean;
+  localFiles?: DriveFileItem[];
   rootFolderUrl: string | null;
   onImportAsProject: (file: DriveFileItem) => Promise<void>;
+  onExportLocalBackup?: () => void;
 }
 
 export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
   token,
+  isGuestMode = false,
+  localFiles = [],
   rootFolderUrl,
   onImportAsProject,
+  onExportLocalBackup,
 }) => {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'folder' | 'sheet' | 'doc'>('all');
@@ -32,6 +38,24 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   const loadFiles = async () => {
+    if (isGuestMode) {
+      const q = query.trim().toLowerCase();
+      const filtered = localFiles.filter((f) => {
+        if (q && !f.name.toLowerCase().includes(q)) return false;
+        if (filter === 'folder') {
+          return f.mimeType === 'application/vnd.google-apps.folder';
+        }
+        if (filter === 'sheet') {
+          return f.mimeType === 'application/vnd.google-apps.spreadsheet';
+        }
+        if (filter === 'doc') {
+          return f.mimeType === 'application/vnd.google-apps.document';
+        }
+        return true;
+      });
+      setFiles(filtered);
+      return;
+    }
     if (!token) return;
     setLoading(true);
     setError(null);
@@ -48,10 +72,10 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
   useEffect(() => {
     const timer = setTimeout(() => {
       loadFiles();
-    }, 250);
+    }, isGuestMode ? 50 : 250);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, query, filter]);
+  }, [token, isGuestMode, localFiles, query, filter]);
 
   const handleImport = async (file: DriveFileItem) => {
     setImportingId(file.id);
@@ -70,13 +94,15 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Google Drive Explorer
+            {isGuestMode ? 'Guest Mode · Local Browser Storage' : 'Google Drive Explorer'}
           </p>
           <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
-            Browse & Import Drive Files
+            {isGuestMode ? 'Local Workspace Files' : 'Browse & Import Drive Files'}
           </h1>
           <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            Search across your Google Drive and bring existing folders, Sheets, or Docs directly into Folio.
+            {isGuestMode
+              ? 'All documents, spreadsheets, and uploaded assets saved locally in your browser during Guest Mode.'
+              : 'Search across your Google Drive and bring existing folders, Sheets, or Docs directly into Folio.'}
           </p>
         </div>
 
@@ -89,7 +115,16 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
           </button>
-          {rootFolderUrl && (
+          {isGuestMode && onExportLocalBackup && (
+            <button
+              type="button"
+              onClick={onExportLocalBackup}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500 whitespace-nowrap shrink-0"
+            >
+              <span>Download Local Backup (.json)</span>
+            </button>
+          )}
+          {!isGuestMode && rootFolderUrl && (
             <a
               href={rootFolderUrl}
               target="_blank"

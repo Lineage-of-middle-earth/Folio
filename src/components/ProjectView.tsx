@@ -5,22 +5,28 @@ import {
   ArrowUpFromLine,
   CheckCircle2,
   ExternalLink,
+  EyeOff,
   FilePlus2,
   Files,
   FileSpreadsheet,
   FileText,
+  FolderInput,
+  FolderMinus,
   FolderOpen,
   Image as ImageIcon,
   Kanban,
   Link2,
   ListChecks,
+  MoreHorizontal,
   RefreshCw,
   Table2,
+  Trash2,
 } from 'lucide-react';
 import {
   DocBlock,
   DriveFileItem,
   ProjectDocPage,
+  ProjectFolderGroup,
   ProjectTabView,
   ProjectWorkspace,
   TaskItem,
@@ -85,6 +91,10 @@ interface ProjectViewProps {
   onLinkExistingFile: () => void;
   onRenameFile: (file: DriveFileItem, newName: string) => void;
   onTrashFile: (file: DriveFileItem) => void;
+  folderGroups?: ProjectFolderGroup[];
+  onAssignProjectToGroup?: (groupId: string | null) => void;
+  onRemoveProjectFromWorkspace?: () => void;
+  onDeleteProjectPermanently?: () => void;
   fullWidth?: boolean;
 }
 
@@ -135,11 +145,16 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   onLinkExistingFile,
   onRenameFile,
   onTrashFile,
+  folderGroups = [],
+  onAssignProjectToGroup,
+  onRemoveProjectFromWorkspace,
+  onDeleteProjectPermanently,
   fullWidth = false,
 }) => {
   const [showIconPicker, setShowIconPicker] = useState(false);
   const [showCoverPicker, setShowCoverPicker] = useState(false);
   const [openCreatorSignal, setOpenCreatorSignal] = useState(0);
+  const [showProjectMenu, setShowProjectMenu] = useState(false);
 
   const hasPendingChanges =
     project.dirtyDoc ||
@@ -533,6 +548,115 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 <span>Sync Now</span>
               </motion.button>
             )}
+
+            {/* 3-Dot Project Options Menu */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowProjectMenu((v) => !v)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-600 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-300 dark:hover:bg-neutral-800"
+                title="Project options (Add page, Move to folder, Remove, Delete)"
+                aria-label="Project options"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+
+              <AnimatePresence>
+                {showProjectMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 4, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 4, scale: 0.96 }}
+                    className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl dark:border-neutral-700 dark:bg-[#242422]"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowProjectMenu(false);
+                        onTabChange('docs');
+                        setOpenCreatorSignal((n) => n + 1);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                    >
+                      <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Add Standalone Page</span>
+                    </button>
+
+                    {folderGroups.length > 0 && onAssignProjectToGroup && (
+                      <>
+                        <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+                        <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                          Folder Group
+                        </div>
+                        {project.groupId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowProjectMenu(false);
+                              onAssignProjectToGroup(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                          >
+                            <FolderMinus className="h-3.5 w-3.5 text-neutral-500" />
+                            <span>Remove from Folder</span>
+                          </button>
+                        )}
+                        {folderGroups
+                          .filter((g) => g.id !== project.groupId)
+                          .map((g) => (
+                            <button
+                              key={g.id}
+                              type="button"
+                              onClick={() => {
+                                setShowProjectMenu(false);
+                                onAssignProjectToGroup(g.id);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                            >
+                              <FolderInput className="h-3.5 w-3.5 text-neutral-500" />
+                              <span className="truncate">
+                                Move to {g.icon} {g.name}
+                              </span>
+                            </button>
+                          ))}
+                      </>
+                    )}
+
+                    {(onRemoveProjectFromWorkspace || onDeleteProjectPermanently) && (
+                      <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+                    )}
+
+                    {onRemoveProjectFromWorkspace && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowProjectMenu(false);
+                          onRemoveProjectFromWorkspace();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                      >
+                        <EyeOff className="h-3.5 w-3.5 text-amber-600" />
+                        <span>Remove from Here (Keep in Drive)</span>
+                      </button>
+                    )}
+
+                    {onDeleteProjectPermanently && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowProjectMenu(false);
+                          onDeleteProjectPermanently();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Delete Permanently from Drive</span>
+                      </button>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
 

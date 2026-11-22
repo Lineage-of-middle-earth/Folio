@@ -6,15 +6,22 @@ import {
   Calendar,
   CheckCircle2,
   ExternalLink,
+  EyeOff,
+  FilePlus2,
   FileSpreadsheet,
   FileText,
+  Folder,
+  FolderInput,
+  FolderMinus,
   FolderOpen,
   FolderPlus,
   Maximize2,
   Minimize2,
+  MoreHorizontal,
   PanelLeftOpen,
   Plus,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 import {
   clearAccessToken,
@@ -29,12 +36,15 @@ import {
   buildTaskDocStarterBlocks,
   createFullWorkspaceProject,
   createStandaloneProjectDocument,
+  createStandaloneWorkspacePage,
   createTaskDocument,
+  discoverStandaloneWorkspacePages,
   discoverWorkspaceProjects,
   fetchDocBlocks,
   fetchSheetTasks,
   findOrCreateRootFolder,
   listFolderFiles,
+  permanentlyDeleteDriveFile,
   renameDriveFile,
   syncBlocksToDoc,
   syncTasksToSheet,
@@ -42,21 +52,36 @@ import {
   uid,
   uploadFileToDriveFolder,
 } from './lib/googleWorkspaceApi';
+import {
+  createLocalStandalonePage,
+  createLocalWorkspaceProject,
+  exportGuestWorkspaceToFile,
+  GUEST_USER_ID,
+  isGuestModeStored,
+  loadGuestWorkspace,
+  saveGuestProjects,
+  saveGuestStandalonePages,
+  setGuestModeStored,
+} from './lib/guestWorkspace';
 import { COVER_PRESETS, getCoverPresetByIndex } from './lib/coverAssets';
 import {
   DocBlock,
   DriveFileItem,
   PendingConfirmation,
   ProjectDocPage,
+  ProjectFolderGroup,
   ProjectTabView,
   ProjectWorkspace,
+  StandalonePage,
   SyncActivityEntry,
   TaskItem,
   WorkspaceArea,
 } from './types/workspace';
 import { AuthScreen } from './components/AuthScreen';
-import { NotionSidebar } from './components/NotionSidebar';
+import { NotionSidebar, SidebarUserProfile } from './components/NotionSidebar';
 import { ProjectView } from './components/ProjectView';
+import { FolderGalleryView } from './components/FolderGalleryView';
+import { StandalonePageView } from './components/StandalonePageView';
 import { SyncHubView } from './components/SyncHubView';
 import { DriveBrowserView } from './components/DriveBrowserView';
 import { CommandPalette } from './components/CommandPalette';
@@ -65,8 +90,16 @@ import { DailyPlannerView } from './components/DailyPlannerView';
 import { LinkWorkspaceModal } from './components/LinkWorkspaceModal';
 import { NewProjectModal } from './components/NewProjectModal';
 
+const GUEST_USER_PROFILE: SidebarUserProfile = {
+  uid: GUEST_USER_ID,
+  displayName: 'Guest Workspace',
+  email: 'Saved locally in browser',
+  photoURL: null,
+};
+
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | SidebarUserProfile | null>(null);
+  const [isGuestMode, setIsGuestMode] = useState<boolean>(false);
   const [token, setToken] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -100,11 +133,19 @@ export default function App() {
     webViewLink: string;
   } | null>(null);
   const [projects, setProjects] = useState<ProjectWorkspace[]>([]);
+  const [folderGroups, setFolderGroups] = useState<ProjectFolderGroup[]>([]);
+  const [standalonePages, setStandalonePages] = useState<StandalonePage[]>([]);
+  const [removedItemIds, setRemovedItemIds] = useState<Record<string, boolean>>({});
+  const [projectGroupMap, setProjectGroupMap] = useState<Record<string, string>>({});
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   const [activeArea, setActiveArea] = useState<WorkspaceArea>('overview');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [activeStandalonePageId, setActiveStandalonePageId] = useState<string | null>(null);
+  const [pendingProjectGroupId, setPendingProjectGroupId] = useState<string | null>(null);
+  const [openOverviewMenuId, setOpenOverviewMenuId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProjectTabView>('page');
   const [isPullingId, setIsPullingId] = useState<string | null>(null);
 
@@ -127,6 +168,8 @@ export default function App() {
   const [syncingTaskDocIds, setSyncingTaskDocIds] = useState<Record<string, boolean>>({});
   const [loadingExtraDocIds, setLoadingExtraDocIds] = useState<Record<string, boolean>>({});
   const [syncingExtraDocIds, setSyncingExtraDocIds] = useState<Record<string, boolean>>({});
+  const [pullingStandaloneIds, setPullingStandaloneIds] = useState<Record<string, boolean>>({});
+  const [syncingStandaloneIds, setSyncingStandaloneIds] = useState<Record<string, boolean>>({});
   const [selectedExtraDocId, setSelectedExtraDocId] = useState<string | null>(null);
   const [requestedTaskId, setRequestedTaskId] = useState<string | null>(null);
   const projectsRef = useRef<ProjectWorkspace[]>([]);
@@ -206,17 +249,114 @@ export default function App() {
     setWorkspaceError(msg);
   }, []);
 
+  // Load and persist folder groups, project group assignments, and removed item IDs per user
+  useEffect(() => {
+    if (!user?.uid) return;
+    try {
+      const rawGroups = localStorage.getItem(`folio_folder_groups_v1_${user.uid}`);
+      if (rawGroups) setFolderGroups(JSON.parse(rawGroups));
+      const rawMap = localStorage.getItem(`folio_project_group_map_v1_${user.uid}`);
+      if (rawMap) setProjectGroupMap(JSON.parse(rawMap));
+      const rawRemoved = localStorage.getItem(`folio_removed_items_v1_${user.uid}`);
+      if (rawRemoved) setRemovedItemIds(JSON.parse(rawRemoved));
+    } catch {
+      // ignore parse errors
+    }
+  }, [user?.uid]);
+
+  const saveFolderGroups = useCallback(
+    (nextGroups: ProjectFolderGroup[]) => {
+      setFolderGroups(nextGroups);
+      if (user?.uid) {
+        try {
+          localStorage.setItem(
+            `folio_folder_groups_v1_${user.uid}`,
+            JSON.stringify(nextGroups)
+          );
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [user?.uid]
+  );
+
+  const saveProjectGroupMap = useCallback(
+    (nextMap: Record<string, string>) => {
+      setProjectGroupMap(nextMap);
+      if (user?.uid) {
+        try {
+          localStorage.setItem(
+            `folio_project_group_map_v1_${user.uid}`,
+            JSON.stringify(nextMap)
+          );
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [user?.uid]
+  );
+
+  const saveRemovedItemIds = useCallback(
+    (nextRemoved: Record<string, boolean>) => {
+      setRemovedItemIds(nextRemoved);
+      if (user?.uid) {
+        try {
+          localStorage.setItem(
+            `folio_removed_items_v1_${user.uid}`,
+            JSON.stringify(nextRemoved)
+          );
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [user?.uid]
+  );
+
   const bootstrapWorkspace = useCallback(
-    async (accessToken: string) => {
+    async (accessToken: string, uidForStorage?: string) => {
       setIsLoadingWorkspace(true);
       setWorkspaceError(null);
       try {
+        let savedGroupMap: Record<string, string> = {};
+        let savedRemoved: Record<string, boolean> = {};
+        if (uidForStorage) {
+          try {
+            const rawMap = localStorage.getItem(
+              `folio_project_group_map_v1_${uidForStorage}`
+            );
+            if (rawMap) savedGroupMap = JSON.parse(rawMap);
+            const rawRemoved = localStorage.getItem(
+              `folio_removed_items_v1_${uidForStorage}`
+            );
+            if (rawRemoved) savedRemoved = JSON.parse(rawRemoved);
+          } catch {
+            // ignore
+          }
+        }
+
         const root = await findOrCreateRootFolder(accessToken);
         setRootFolder(root);
-        const discovered = await discoverWorkspaceProjects(accessToken, root.id);
-        setProjects(discovered);
-        if (discovered.length > 0) {
-          setActiveProjectId((curr) => curr || discovered[0].id);
+        const [discoveredProjects, discoveredPages] = await Promise.all([
+          discoverWorkspaceProjects(accessToken, root.id),
+          discoverStandaloneWorkspacePages(accessToken, root.id),
+        ]);
+
+        const visibleProjects = discoveredProjects
+          .filter((p) => !savedRemoved[p.id])
+          .map((p) => ({
+            ...p,
+            groupId: savedGroupMap[p.id] || p.groupId || null,
+          }));
+
+        const visiblePages = discoveredPages.filter((pg) => !savedRemoved[pg.id]);
+
+        setProjects(visibleProjects);
+        setStandalonePages(visiblePages);
+        if (visibleProjects.length > 0) {
+          setActiveProjectId((curr) => curr || visibleProjects[0].id);
         }
       } catch (err) {
         handleApiError(err);
@@ -227,22 +367,79 @@ export default function App() {
     [handleApiError]
   );
 
+  const bootstrapGuestWorkspace = useCallback(() => {
+    let savedGroupMap: Record<string, string> = {};
+    let savedRemoved: Record<string, boolean> = {};
+    try {
+      const rawMap = localStorage.getItem(
+        `folio_project_group_map_v1_${GUEST_USER_ID}`
+      );
+      if (rawMap) savedGroupMap = JSON.parse(rawMap);
+      const rawRemoved = localStorage.getItem(
+        `folio_removed_items_v1_${GUEST_USER_ID}`
+      );
+      if (rawRemoved) savedRemoved = JSON.parse(rawRemoved);
+    } catch {
+      // ignore
+    }
+
+    const loaded = loadGuestWorkspace(savedGroupMap, savedRemoved);
+    setProjects(loaded.projects);
+    setStandalonePages(loaded.standalonePages);
+    setRootFolder(null);
+    if (loaded.projects.length > 0) {
+      setActiveProjectId((curr) => curr || loaded.projects[0].id);
+    }
+  }, []);
+
+  // Automatically persist projects & standalone pages in Guest Mode whenever they change
+  useEffect(() => {
+    if (!isGuestMode || needsAuth) return;
+    saveGuestProjects(projects);
+  }, [isGuestMode, needsAuth, projects]);
+
+  useEffect(() => {
+    if (!isGuestMode || needsAuth) return;
+    saveGuestStandalonePages(standalonePages);
+  }, [isGuestMode, needsAuth, standalonePages]);
+
   useEffect(() => {
     const unsub = initAuth(
       (authUser, accessToken) => {
+        setGuestModeStored(false);
+        setIsGuestMode(false);
         setUser(authUser);
         setToken(accessToken);
         setNeedsAuth(false);
-        bootstrapWorkspace(accessToken);
+        bootstrapWorkspace(accessToken, authUser.uid);
       },
       (authUser) => {
+        if (isGuestModeStored()) {
+          setIsGuestMode(true);
+          setUser(GUEST_USER_PROFILE);
+          setToken(null);
+          setNeedsAuth(false);
+          bootstrapGuestWorkspace();
+          return;
+        }
         setUser(authUser);
         setToken(null);
         setNeedsAuth(true);
       }
     );
     return () => unsub();
-  }, [bootstrapWorkspace]);
+  }, [bootstrapWorkspace, bootstrapGuestWorkspace]);
+
+  const handleGuestLogin = () => {
+    setAuthError(null);
+    setGuestModeStored(true);
+    setIsGuestMode(true);
+    setUser(GUEST_USER_PROFILE);
+    setToken(null);
+    setNeedsAuth(false);
+    bootstrapGuestWorkspace();
+    showToast('Entered Guest Mode — all files are saved locally in your browser');
+  };
 
   const handleLogin = async () => {
     setIsSigningIn(true);
@@ -250,10 +447,12 @@ export default function App() {
     try {
       const res = await googleSignIn();
       if (res) {
+        setGuestModeStored(false);
+        setIsGuestMode(false);
         setUser(res.user);
         setToken(res.accessToken);
         setNeedsAuth(false);
-        await bootstrapWorkspace(res.accessToken);
+        await bootstrapWorkspace(res.accessToken, res.user.uid);
       }
     } catch (err) {
       setAuthError(
@@ -265,27 +464,46 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await logout();
+    if (isGuestMode) {
+      setGuestModeStored(false);
+      setIsGuestMode(false);
+    } else {
+      await logout();
+    }
     setUser(null);
     setToken(null);
     setProjects([]);
+    setStandalonePages([]);
     setRootFolder(null);
     setActiveProjectId(null);
+    setActiveGroupId(null);
+    setActiveStandalonePageId(null);
     setNeedsAuth(true);
   };
 
   const requireToken = useCallback((): string | null => {
+    if (isGuestMode) return null;
     const activeToken = token || getAccessToken();
     if (!activeToken) {
       setNeedsAuth(true);
       return null;
     }
     return activeToken;
-  }, [token]);
+  }, [token, isGuestMode]);
 
   const activeProject = useMemo(
     () => projects.find((p) => p.id === activeProjectId) || null,
     [projects, activeProjectId]
+  );
+
+  const activeFolderGroup = useMemo(
+    () => folderGroups.find((g) => g.id === activeGroupId) || null,
+    [folderGroups, activeGroupId]
+  );
+
+  const activeStandalonePage = useMemo(
+    () => standalonePages.find((pg) => pg.id === activeStandalonePageId) || null,
+    [standalonePages, activeStandalonePageId]
   );
 
   const updateLocalProject = useCallback(
@@ -295,12 +513,35 @@ export default function App() {
     []
   );
 
-  // Create new project inside Folio Workspace folder
+  // Create new project inside Folio Workspace folder (or locally in Guest Mode)
   const handleCreateProject = async (
     title: string,
     icon: string,
     coverIndex: number
   ) => {
+    if (isGuestMode) {
+      const created = createLocalWorkspaceProject(title, icon, coverIndex);
+      const assignedGroupId = pendingProjectGroupId;
+      const withGroup: ProjectWorkspace = {
+        ...created,
+        groupId: assignedGroupId || null,
+      };
+      if (assignedGroupId) {
+        saveProjectGroupMap({
+          ...projectGroupMap,
+          [created.id]: assignedGroupId,
+        });
+      }
+      setPendingProjectGroupId(null);
+      setProjects((prev) => [withGroup, ...prev]);
+      setActiveProjectId(withGroup.id);
+      setActiveArea('project');
+      setActiveTab('page');
+      logActivity(title, 'Workspace', 'Created local project, tasks & brief');
+      showToast(`Created "${title}" locally`);
+      return;
+    }
+
     const accessToken = requireToken();
     if (!accessToken || !rootFolder) {
       throw new Error('Google Drive root folder is not ready.');
@@ -312,17 +553,541 @@ export default function App() {
       icon,
       coverIndex
     );
-    setProjects((prev) => [created, ...prev]);
-    setActiveProjectId(created.id);
+    const assignedGroupId = pendingProjectGroupId;
+    const withGroup: ProjectWorkspace = {
+      ...created,
+      groupId: assignedGroupId || null,
+    };
+    if (assignedGroupId) {
+      saveProjectGroupMap({
+        ...projectGroupMap,
+        [created.id]: assignedGroupId,
+      });
+    }
+    setPendingProjectGroupId(null);
+    setProjects((prev) => [withGroup, ...prev]);
+    setActiveProjectId(withGroup.id);
     setActiveArea('project');
     setActiveTab('page');
     logActivity(title, 'Workspace', 'Created Drive folder, Sheet, and Doc');
     showToast(`Created "${title}" in Google Drive`);
   };
 
-  // Pull latest from Google Sheets, Docs & Drive (read-only)
+  // Folder Group handlers
+  const handleCreateFolderGroup = (name: string, icon: string) => {
+    const newGroup: ProjectFolderGroup = {
+      id: uid('grp'),
+      name: name.trim() || 'Untitled Folder',
+      icon: icon || '📁',
+      createdAt: new Date().toISOString(),
+    };
+    const next = [...folderGroups, newGroup];
+    saveFolderGroups(next);
+    setActiveGroupId(newGroup.id);
+    setActiveArea('folder-group');
+    showToast(`Created folder "${newGroup.name}"`);
+  };
+
+  const handleRenameFolderGroup = (groupId: string, newName: string) => {
+    const next = folderGroups.map((g) =>
+      g.id === groupId ? { ...g, name: newName } : g
+    );
+    saveFolderGroups(next);
+  };
+
+  const handleChangeFolderGroupIcon = (groupId: string, icon: string) => {
+    const next = folderGroups.map((g) =>
+      g.id === groupId ? { ...g, icon } : g
+    );
+    saveFolderGroups(next);
+  };
+
+  const handleDeleteFolderGroup = (groupId: string) => {
+    const target = folderGroups.find((g) => g.id === groupId);
+    if (!target) return;
+    const nextGroups = folderGroups.filter((g) => g.id !== groupId);
+    saveFolderGroups(nextGroups);
+    const nextMap = { ...projectGroupMap };
+    Object.keys(nextMap).forEach((pid) => {
+      if (nextMap[pid] === groupId) {
+        delete nextMap[pid];
+      }
+    });
+    saveProjectGroupMap(nextMap);
+    setProjects((prev) =>
+      prev.map((p) => (p.groupId === groupId ? { ...p, groupId: null } : p))
+    );
+    if (activeArea === 'folder-group' && activeGroupId === groupId) {
+      setActiveArea('overview');
+      setActiveGroupId(null);
+    }
+    showToast(`Ungrouped folder "${target.name}" (projects kept in workspace)`);
+  };
+
+  const handleAssignProjectToGroup = (
+    projectId: string,
+    groupId: string | null
+  ) => {
+    const nextMap = { ...projectGroupMap };
+    if (groupId) {
+      nextMap[projectId] = groupId;
+    } else {
+      delete nextMap[projectId];
+    }
+    saveProjectGroupMap(nextMap);
+    updateLocalProject(projectId, (p) => ({ ...p, groupId }));
+    const targetGroup = folderGroups.find((g) => g.id === groupId);
+    showToast(
+      targetGroup
+        ? `Moved project to "${targetGroup.name}"`
+        : 'Removed project from folder'
+    );
+  };
+
+  // Remove Project from Folio Workspace (keeps files in Google Drive)
+  const handleRemoveProjectFromWorkspace = (project: ProjectWorkspace) => {
+    setPendingConfirmation({
+      title: `Remove "${project.title}" from Folio?`,
+      description:
+        'This removes the project from your Folio sidebar and overview list. Your Google Drive folder, Google Sheet, and Google Docs will NOT be deleted from Google Drive.',
+      details: [
+        `Project: ${project.icon} ${project.title}`,
+        'Google Drive files remain completely untouched in your Google Drive.',
+        'You can restore or re-import this project from Google Drive at any time.',
+      ],
+      confirmLabel: 'Remove from Here',
+      onConfirm: async () => {
+        const nextRemoved = { ...removedItemIds, [project.id]: true };
+        saveRemovedItemIds(nextRemoved);
+        setProjects((prev) => prev.filter((p) => p.id !== project.id));
+        if (activeProjectId === project.id) {
+          const remaining = projects.filter((p) => p.id !== project.id);
+          setActiveProjectId(remaining[0]?.id || null);
+          if (activeArea === 'project') {
+            setActiveArea('overview');
+          }
+        }
+        showToast(`Removed "${project.title}" from Folio (kept in Google Drive)`);
+      },
+    });
+  };
+
+  // Permanently Delete Project from Google Drive & Folio (or Local Storage in Guest Mode)
+  const handleDeleteProjectPermanently = (project: ProjectWorkspace) => {
+    if (isGuestMode) {
+      setPendingConfirmation({
+        title: `Permanently delete "${project.title}" from Local Storage?`,
+        description:
+          'This will permanently delete this project, its tasks, and all its documents from your local browser storage. This action cannot be undone.',
+        details: [`Local Project: "${project.title}"`],
+        confirmLabel: 'Delete Permanently',
+        danger: true,
+        onConfirm: async () => {
+          setProjects((prev) => prev.filter((p) => p.id !== project.id));
+          if (activeProjectId === project.id) {
+            const remaining = projects.filter((p) => p.id !== project.id);
+            setActiveProjectId(remaining[0]?.id || null);
+            if (activeArea === 'project') {
+              setActiveArea('overview');
+            }
+          }
+          logActivity(project.title, 'Workspace', 'Deleted project from local storage');
+          showToast(`Deleted "${project.title}" from local storage`);
+        },
+      });
+      return;
+    }
+
+    const driveTargets: string[] = [];
+    if (project.driveFolderId) {
+      driveTargets.push(
+        `Google Drive Folder: "${project.driveFolderName || project.title}" (and all files inside it)`
+      );
+    } else {
+      if (project.sheetId) {
+        driveTargets.push(
+          `Google Sheet: "${project.sheetTitle || 'Tasks'}"`
+        );
+      }
+      if (project.docId) {
+        driveTargets.push(`Google Doc: "${project.docTitle || 'Brief'}"`);
+      }
+    }
+
+    setPendingConfirmation({
+      title: `Permanently delete "${project.title}" from Google Drive?`,
+      description:
+        'This will permanently delete the project from your Google Drive as well as remove it from Folio. This action cannot be undone.',
+      details:
+        driveTargets.length > 0
+          ? driveTargets
+          : [`Project "${project.title}" will be permanently deleted.`],
+      confirmLabel: 'Delete Permanently from Drive',
+      danger: true,
+      onConfirm: async () => {
+        const freshToken = requireToken();
+        if (!freshToken) return;
+
+        if (project.driveFolderId) {
+          await permanentlyDeleteDriveFile(freshToken, project.driveFolderId);
+        } else {
+          if (project.sheetId) {
+            await permanentlyDeleteDriveFile(freshToken, project.sheetId);
+          }
+          if (project.docId) {
+            await permanentlyDeleteDriveFile(freshToken, project.docId);
+          }
+        }
+
+        setProjects((prev) => prev.filter((p) => p.id !== project.id));
+        if (activeProjectId === project.id) {
+          const remaining = projects.filter((p) => p.id !== project.id);
+          setActiveProjectId(remaining[0]?.id || null);
+          if (activeArea === 'project') {
+            setActiveArea('overview');
+          }
+        }
+        logActivity(
+          project.title,
+          'Drive',
+          'Permanently deleted project from Google Drive'
+        );
+        showToast(`Permanently deleted "${project.title}" from Google Drive`);
+      },
+    });
+  };
+
+  // Workspace-Level Standalone Pages handlers
+  const handleCreateWorkspaceStandalonePage = (
+    parentDocId: string | null = null,
+    initialTitle = 'Untitled Page',
+    replaceBlockId?: string
+  ) => {
+    const cleanTitle = initialTitle.trim() || 'Untitled Page';
+    const starterBlocks = buildStandaloneDocStarterBlocks(cleanTitle, 'blank');
+
+    if (isGuestMode) {
+      const created = createLocalStandalonePage({
+        title: cleanTitle,
+        icon: parentDocId ? '📑' : '📄',
+        parentDocId,
+        blocks: starterBlocks,
+      });
+
+      if (parentDocId) {
+        const parentPage = standalonePages.find((p) => p.id === parentDocId);
+        if (parentPage) {
+          const pageBlock: DocBlock = {
+            id: replaceBlockId || uid('blk'),
+            type: 'page',
+            content: created.title,
+            docId: created.id,
+            docUrl: '',
+          };
+          const nextParentBlocks = replaceBlockId
+            ? parentPage.blocks.map((b) =>
+                b.id === replaceBlockId ? pageBlock : b
+              )
+            : [...parentPage.blocks, pageBlock];
+          setStandalonePages((prev) => [
+            created,
+            ...prev.map((p) =>
+              p.id === parentPage.id
+                ? { ...p, blocks: nextParentBlocks, dirty: false }
+                : p
+            ),
+          ]);
+        } else {
+          setStandalonePages((prev) => [created, ...prev]);
+        }
+      } else {
+        setStandalonePages((prev) => [created, ...prev]);
+      }
+
+      setActiveStandalonePageId(created.id);
+      setActiveArea('standalone-page');
+      logActivity(created.title, 'Docs', 'Created local standalone page');
+      showToast(`Created standalone page "${created.title}" locally`);
+      return;
+    }
+
+    const accessToken = requireToken();
+    if (!accessToken) return;
+
+    setPendingConfirmation({
+      title: `Create Standalone Google Doc Page "${cleanTitle}"?`,
+      description:
+        'This will create a new standalone Google Doc inside your Folio Workspace folder on Google Drive and open it as a full-screen Notion-style page.',
+      details: [
+        `Page Title: "${cleanTitle}"`,
+        `Location: ${rootFolder?.name || 'Folio Workspace'} (Google Drive)`,
+      ],
+      confirmLabel: 'Create Standalone Page',
+      onConfirm: async () => {
+        const freshToken = requireToken();
+        if (!freshToken) return;
+        const created = await createStandaloneWorkspacePage(freshToken, {
+          title: cleanTitle,
+          icon: parentDocId ? '📑' : '📄',
+          rootFolderId: rootFolder?.id || null,
+          blocks: starterBlocks,
+          parentDocId,
+        });
+
+        if (parentDocId) {
+          const parentPage = standalonePages.find((p) => p.id === parentDocId);
+          if (parentPage) {
+            const pageBlock: DocBlock = {
+              id: replaceBlockId || uid('blk'),
+              type: 'page',
+              content: created.title,
+              docId: created.id,
+              docUrl: created.docUrl,
+            };
+            const nextParentBlocks = replaceBlockId
+              ? parentPage.blocks.map((b) =>
+                  b.id === replaceBlockId ? pageBlock : b
+                )
+              : [...parentPage.blocks, pageBlock];
+            await syncBlocksToDoc(freshToken, parentPage.id, nextParentBlocks);
+            setStandalonePages((prev) => [
+              created,
+              ...prev.map((p) =>
+                p.id === parentPage.id
+                  ? { ...p, blocks: nextParentBlocks, dirty: false }
+                  : p
+              ),
+            ]);
+          } else {
+            setStandalonePages((prev) => [created, ...prev]);
+          }
+        } else {
+          setStandalonePages((prev) => [created, ...prev]);
+        }
+
+        setActiveStandalonePageId(created.id);
+        setActiveArea('standalone-page');
+        logActivity(
+          created.title,
+          'Docs',
+          'Created standalone Google Doc page'
+        );
+        showToast(`Created standalone page "${created.title}"`);
+      },
+    });
+  };
+
+  const handlePullStandalonePage = async (page: StandalonePage) => {
+    if (isGuestMode) {
+      setStandalonePages((prev) =>
+        prev.map((p) =>
+          p.id === page.id
+            ? { ...p, dirty: false, lastSyncedAt: new Date().toISOString() }
+            : p
+        )
+      );
+      showToast(`"${page.title}" is up to date in local storage`);
+      return;
+    }
+    const accessToken = requireToken();
+    if (!accessToken) return;
+    setPullingStandaloneIds((prev) => ({ ...prev, [page.id]: true }));
+    try {
+      const docData = await fetchDocBlocks(accessToken, page.id);
+      setStandalonePages((prev) =>
+        prev.map((p) =>
+          p.id === page.id
+            ? {
+                ...p,
+                title: docData.docTitle,
+                docUrl: docData.docUrl,
+                blocks:
+                  docData.blocks.length > 0
+                    ? docData.blocks
+                    : buildStandaloneDocStarterBlocks(docData.docTitle, 'blank'),
+                dirty: false,
+                lastSyncedAt: new Date().toISOString(),
+              }
+            : p
+        )
+      );
+      showToast(`Pulled latest Google Doc for "${page.title}"`);
+    } catch (err) {
+      handleApiError(err);
+    } finally {
+      setPullingStandaloneIds((prev) => ({ ...prev, [page.id]: false }));
+    }
+  };
+
+  const handlePushStandalonePage = (page: StandalonePage) => {
+    const blocksSnapshot = page.blocks;
+    const titleSnapshot = page.title.trim() || 'Untitled Page';
+    if (isGuestMode) {
+      setStandalonePages((prev) =>
+        prev.map((p) =>
+          p.id === page.id
+            ? {
+                ...p,
+                title: titleSnapshot,
+                dirty: false,
+                lastSyncedAt: new Date().toISOString(),
+              }
+            : p
+        )
+      );
+      logActivity(
+        titleSnapshot,
+        'Docs',
+        `Saved standalone page locally (${blocksSnapshot.length} blocks)`
+      );
+      showToast(`Saved "${titleSnapshot}" to local storage`);
+      return;
+    }
+
+    setPendingConfirmation({
+      title: `Save "${titleSnapshot}" to Google Docs?`,
+      description:
+        'This will update the standalone Google Doc in your Google Drive with your latest blocks and title.',
+      details: [
+        `Google Doc: "${titleSnapshot}"`,
+        `Blocks to write: ${blocksSnapshot.length} structured block(s)`,
+      ],
+      confirmLabel: 'Save to Google Doc',
+      onConfirm: async () => {
+        const freshToken = requireToken();
+        if (!freshToken) return;
+        setSyncingStandaloneIds((prev) => ({ ...prev, [page.id]: true }));
+        try {
+          await renameDriveFile(freshToken, page.id, titleSnapshot);
+          await syncBlocksToDoc(freshToken, page.id, blocksSnapshot);
+          setStandalonePages((prev) =>
+            prev.map((p) =>
+              p.id === page.id
+                ? {
+                    ...p,
+                    title: titleSnapshot,
+                    dirty: false,
+                    lastSyncedAt: new Date().toISOString(),
+                  }
+                : p
+            )
+          );
+          logActivity(
+            titleSnapshot,
+            'Docs',
+            `Synced standalone page (${blocksSnapshot.length} blocks)`
+          );
+          showToast(`Saved "${titleSnapshot}" to Google Docs`);
+        } finally {
+          setSyncingStandaloneIds((prev) => ({ ...prev, [page.id]: false }));
+        }
+      },
+    });
+  };
+
+  const handleRemoveStandalonePageFromWorkspace = (page: StandalonePage) => {
+    setPendingConfirmation({
+      title: `Remove "${page.title}" from Folio?`,
+      description: isGuestMode
+        ? 'This hides the standalone page from your sidebar list.'
+        : 'This removes the standalone page from your Folio sidebar while keeping the Google Doc safely in your Google Drive.',
+      details: [
+        `Page: ${page.icon} ${page.title}`,
+        isGuestMode
+          ? 'Removed from active workspace list.'
+          : 'The Google Doc remains untouched in your Google Drive.',
+      ],
+      confirmLabel: 'Remove from Here',
+      onConfirm: async () => {
+        const nextRemoved = { ...removedItemIds, [page.id]: true };
+        saveRemovedItemIds(nextRemoved);
+        setStandalonePages((prev) => prev.filter((p) => p.id !== page.id));
+        if (activeStandalonePageId === page.id) {
+          setActiveStandalonePageId(null);
+          setActiveArea('overview');
+        }
+        showToast(`Removed "${page.title}" from Folio`);
+      },
+    });
+  };
+
+  const handleDeleteStandalonePagePermanently = (page: StandalonePage) => {
+    if (isGuestMode) {
+      setPendingConfirmation({
+        title: `Permanently delete "${page.title}"?`,
+        description:
+          'This will permanently delete this standalone page from your local browser storage.',
+        details: [`Standalone Page: "${page.title}"`],
+        confirmLabel: 'Delete Permanently',
+        danger: true,
+        onConfirm: async () => {
+          setStandalonePages((prev) => prev.filter((p) => p.id !== page.id));
+          if (activeStandalonePageId === page.id) {
+            setActiveStandalonePageId(null);
+            setActiveArea('overview');
+          }
+          logActivity(page.title, 'Docs', 'Deleted standalone page from local storage');
+          showToast(`Deleted "${page.title}" from local storage`);
+        },
+      });
+      return;
+    }
+
+    setPendingConfirmation({
+      title: `Permanently delete "${page.title}" from Google Drive?`,
+      description:
+        'This will permanently delete this standalone Google Doc from your Google Drive and remove it from Folio. This action cannot be undone.',
+      details: [`Google Doc: "${page.title}"`],
+      confirmLabel: 'Delete Permanently from Drive',
+      danger: true,
+      onConfirm: async () => {
+        const freshToken = requireToken();
+        if (!freshToken) return;
+        await permanentlyDeleteDriveFile(freshToken, page.id);
+        setStandalonePages((prev) => prev.filter((p) => p.id !== page.id));
+        if (activeStandalonePageId === page.id) {
+          setActiveStandalonePageId(null);
+          setActiveArea('overview');
+        }
+        logActivity(
+          page.title,
+          'Docs',
+          'Permanently deleted standalone Google Doc from Drive'
+        );
+        showToast(`Permanently deleted "${page.title}" from Google Drive`);
+      },
+    });
+  };
+
+  const handleAddStandalonePageToProject = (projectId: string) => {
+    const targetProject = projects.find((p) => p.id === projectId);
+    if (!targetProject) return;
+    setActiveProjectId(projectId);
+    setActiveArea('project');
+    setActiveTab('docs');
+    const defaultTitle = `${targetProject.title} — Page ${
+      targetProject.extraDocs.length + 1
+    }`;
+    const starterBlocks = buildStandaloneDocStarterBlocks(defaultTitle, 'spec');
+    handleCreateStandaloneDoc(targetProject, defaultTitle, starterBlocks);
+  };
+
+  // Pull latest from Google Sheets, Docs & Drive (or verify local storage in Guest Mode)
   const executePullProject = useCallback(
     async (project: ProjectWorkspace, silent = false) => {
+      if (isGuestMode) {
+        updateLocalProject(project.id, (p) => ({
+          ...p,
+          lastSyncedAt: new Date().toISOString(),
+          dirtyDoc: false,
+          dirtyTasks: false,
+        }));
+        if (!silent) {
+          showToast(`"${project.title}" is saved in local storage`);
+        }
+        return;
+      }
+
       const accessToken = requireToken();
       if (!accessToken) return;
       if (!silent) {
@@ -421,10 +1186,14 @@ export default function App() {
         }
       }
     },
-    [handleApiError, hasProjectDirty, logActivity, requireToken, showToast, updateLocalProject]
+    [handleApiError, hasProjectDirty, isGuestMode, logActivity, requireToken, showToast, updateLocalProject]
   );
 
   const handlePullProject = (project: ProjectWorkspace) => {
+    if (isGuestMode) {
+      executePullProject(project);
+      return;
+    }
     if (hasProjectDirty(project)) {
       const dirtyTaskDocsCount = project.tasks.filter((t) => t.dirtyTaskDoc).length;
       const dirtyExtraDocsCount = project.extraDocs.filter((d) => d.dirty).length;
@@ -460,6 +1229,10 @@ export default function App() {
   };
 
   const handlePullAll = () => {
+    if (isGuestMode) {
+      showToast('All Guest Mode projects are saved in local browser storage.');
+      return;
+    }
     const cleanProjects = projects.filter(
       (p) => !hasProjectDirty(p) && !syncingRef.current[p.id]
     );
@@ -475,6 +1248,27 @@ export default function App() {
 
   const executePushProject = useCallback(
     async (projectSnapshot: ProjectWorkspace, silent = false) => {
+      if (isGuestMode) {
+        updateLocalProject(projectSnapshot.id, (p) => ({
+          ...p,
+          driveFolderName: p.title.trim() || p.driveFolderName,
+          dirtyTasks: false,
+          dirtyDoc: false,
+          tasks: p.tasks.map((t) => ({ ...t, dirtyTaskDoc: false })),
+          extraDocs: p.extraDocs.map((d) => ({ ...d, dirty: false })),
+          lastSyncedAt: new Date().toISOString(),
+        }));
+        logActivity(
+          projectSnapshot.title,
+          'Workspace',
+          'Saved all project changes to local browser storage'
+        );
+        if (!silent) {
+          showToast(`Saved "${projectSnapshot.title}" locally`);
+        }
+        return;
+      }
+
       const freshToken = requireToken();
       if (!freshToken) throw new Error('Session expired.');
       if (syncingRef.current[projectSnapshot.id]) return;
@@ -609,7 +1403,7 @@ export default function App() {
         setSyncingIds((prev) => ({ ...prev, [projectSnapshot.id]: false }));
       }
     },
-    [logActivity, requireToken, showToast, updateLocalProject]
+    [isGuestMode, logActivity, requireToken, showToast, updateLocalProject]
   );
 
   // Explicit opt-in confirmation for enabling automatic background sync
@@ -714,8 +1508,13 @@ export default function App() {
     };
   }, [needsAuth, token, activeProjectId, hasProjectDirty, executePullProject]);
 
-  // Manual push with explicit confirmation
+  // Manual push with explicit confirmation (or immediate local save in Guest Mode)
   const handlePushProject = (project: ProjectWorkspace) => {
+    if (isGuestMode) {
+      executePushProject(project, false);
+      return;
+    }
+
     const accessToken = requireToken();
     if (!accessToken) return;
 
@@ -772,8 +1571,42 @@ export default function App() {
     });
   };
 
-  // Upload local file to Drive folder (with confirmation)
+  // Upload local file to Drive folder (or save locally in Guest Mode)
   const handleUploadFile = (project: ProjectWorkspace, file: File) => {
+    if (isGuestMode) {
+      const addLocalFileItem = (dataUrl?: string) => {
+        const localFile: DriveFileItem = {
+          id: uid('local_file'),
+          name: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          webViewLink: dataUrl,
+          modifiedTime: new Date().toISOString(),
+          size: String(file.size),
+        };
+        updateLocalProject(project.id, (p) => ({
+          ...p,
+          driveFiles: [localFile, ...p.driveFiles],
+          lastSyncedAt: new Date().toISOString(),
+        }));
+        logActivity(project.title, 'Drive', `Saved file "${file.name}" locally`);
+        showToast(`Saved "${file.name}" to local storage`);
+      };
+
+      if (file.size <= 2 * 1024 * 1024) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          addLocalFileItem(
+            typeof reader.result === 'string' ? reader.result : undefined
+          );
+        };
+        reader.onerror = () => addLocalFileItem();
+        reader.readAsDataURL(file);
+      } else {
+        addLocalFileItem(URL.createObjectURL(file));
+      }
+      return;
+    }
+
     const accessToken = requireToken();
     if (!accessToken || !project.driveFolderId) return;
 
@@ -805,12 +1638,29 @@ export default function App() {
     });
   };
 
-  // Rename Drive file (with confirmation)
+  // Rename Drive file (or local file in Guest Mode)
   const handleRenameFile = (
     project: ProjectWorkspace,
     file: DriveFileItem,
     newName: string
   ) => {
+    if (isGuestMode) {
+      updateLocalProject(project.id, (p) => ({
+        ...p,
+        driveFiles: p.driveFiles.map((f) =>
+          f.id === file.id ? { ...f, name: newName } : f
+        ),
+        extraDocs: p.extraDocs.map((d) =>
+          d.id === file.id ? { ...d, title: newName } : d
+        ),
+        sheetTitle: p.sheetId === file.id ? newName : p.sheetTitle,
+        docTitle: p.docId === file.id ? newName : p.docTitle,
+      }));
+      logActivity(project.title, 'Drive', `Renamed "${file.name}" to "${newName}" locally`);
+      showToast(`Renamed to "${newName}"`);
+      return;
+    }
+
     setPendingConfirmation({
       title: `Rename "${file.name}" in Google Drive?`,
       description: 'This updates the file name directly in your Google Drive.',
@@ -837,8 +1687,36 @@ export default function App() {
     });
   };
 
-  // Move Drive file to Trash (with confirmation)
+  // Move Drive file to Trash (or remove local file in Guest Mode)
   const handleTrashFile = (project: ProjectWorkspace, file: DriveFileItem) => {
+    if (isGuestMode) {
+      setPendingConfirmation({
+        title: `Delete "${file.name}" from Local Storage?`,
+        description:
+          'This removes the file from your local project files list.',
+        details: [
+          `File: ${file.name}`,
+          `Project: ${project.title}`,
+        ],
+        confirmLabel: 'Delete File',
+        danger: true,
+        onConfirm: async () => {
+          updateLocalProject(project.id, (p) => ({
+            ...p,
+            driveFiles: p.driveFiles.filter((f) => f.id !== file.id),
+            extraDocs: p.extraDocs.filter((d) => d.id !== file.id),
+            sheetId: p.sheetId === file.id ? null : p.sheetId,
+            sheetUrl: p.sheetId === file.id ? null : p.sheetUrl,
+            docId: p.docId === file.id ? null : p.docId,
+            docUrl: p.docId === file.id ? null : p.docUrl,
+          }));
+          logActivity(project.title, 'Drive', `Deleted "${file.name}" locally`);
+          showToast(`Deleted "${file.name}"`);
+        },
+      });
+      return;
+    }
+
     setPendingConfirmation({
       title: `Move "${file.name}" to Google Drive Trash?`,
       description:
@@ -870,6 +1748,10 @@ export default function App() {
 
   // Refresh Drive folder file list
   const handleRefreshDriveFolder = async (project: ProjectWorkspace) => {
+    if (isGuestMode) {
+      showToast('Local files list is up to date');
+      return;
+    }
     const accessToken = requireToken();
     if (!accessToken || !project.driveFolderId) return;
     try {
@@ -884,6 +1766,23 @@ export default function App() {
   // Per-task Google Doc handlers
   const handleLoadTaskDoc = useCallback(
     async (project: ProjectWorkspace, task: TaskItem) => {
+      if (isGuestMode) {
+        if (!task.docBlocks || task.docBlocks.length === 0) {
+          updateLocalProject(project.id, (p) => ({
+            ...p,
+            tasks: p.tasks.map((t) =>
+              t.id === task.id
+                ? {
+                    ...t,
+                    docBlocks: buildTaskDocStarterBlocks(t, 'blank'),
+                    dirtyTaskDoc: false,
+                  }
+                : t
+            ),
+          }));
+        }
+        return;
+      }
       const accessToken = requireToken();
       if (!accessToken || !task.docId) return;
       setLoadingTaskDocIds((prev) => ({ ...prev, [task.id]: true }));
@@ -912,16 +1811,24 @@ export default function App() {
         setLoadingTaskDocIds((prev) => ({ ...prev, [task.id]: false }));
       }
     },
-    [handleApiError, requireToken, updateLocalProject]
+    [handleApiError, isGuestMode, requireToken, updateLocalProject]
   );
 
   const executePullTaskDoc = async (project: ProjectWorkspace, task: TaskItem) => {
     await handleLoadTaskDoc(project, task);
-    showToast(`Pulled latest Google Doc for "${task.title}"`);
+    showToast(
+      isGuestMode
+        ? `"${task.title}" document is saved locally`
+        : `Pulled latest Google Doc for "${task.title}"`
+    );
   };
 
   const handlePullTaskDoc = async (project: ProjectWorkspace, task: TaskItem) => {
     if (!task.docId) return;
+    if (isGuestMode) {
+      await executePullTaskDoc(project, task);
+      return;
+    }
     if (task.dirtyTaskDoc) {
       setPendingConfirmation({
         title: `Discard unsynced edits in "${task.docTitle || task.title}"?`,
@@ -940,6 +1847,23 @@ export default function App() {
   const handlePushTaskDoc = (project: ProjectWorkspace, task: TaskItem) => {
     if (!task.docId || !task.docBlocks) return;
     const blocksSnapshot = task.docBlocks;
+    if (isGuestMode) {
+      updateLocalProject(project.id, (p) => ({
+        ...p,
+        lastSyncedAt: new Date().toISOString(),
+        tasks: p.tasks.map((t) =>
+          t.id === task.id ? { ...t, dirtyTaskDoc: false } : t
+        ),
+      }));
+      logActivity(
+        project.title,
+        'Docs',
+        `Saved task doc "${task.docTitle || task.title}" locally`
+      );
+      showToast(`Saved "${task.docTitle || task.title}" to local storage`);
+      return;
+    }
+
     setPendingConfirmation({
       title: `Save "${task.docTitle || task.title}" to Google Docs?`,
       description:
@@ -983,9 +1907,45 @@ export default function App() {
     docTitle: string,
     blocks: DocBlock[]
   ) => {
+    const cleanTitle = docTitle.trim() || task.title.trim() || 'Untitled Task Document';
+    if (isGuestMode) {
+      const localDocId = uid('local_tdoc');
+      const nowIso = new Date().toISOString();
+      const newDriveItem: DriveFileItem = {
+        id: localDocId,
+        name: cleanTitle,
+        mimeType: 'application/vnd.google-apps.document',
+        modifiedTime: nowIso,
+        appProperties: { folioTaskDoc: 'true', folioTaskId: task.id },
+      };
+      updateLocalProject(project.id, (p) => ({
+        ...p,
+        tasks: p.tasks.map((t) =>
+          t.id === task.id
+            ? {
+                ...t,
+                docId: localDocId,
+                docUrl: '',
+                docTitle: cleanTitle,
+                docBlocks: blocks,
+                dirtyTaskDoc: false,
+              }
+            : t
+        ),
+        driveFiles: [newDriveItem, ...p.driveFiles],
+        lastSyncedAt: nowIso,
+      }));
+      logActivity(
+        project.title,
+        'Docs',
+        `Created local task document "${cleanTitle}"`
+      );
+      showToast(`Created task document "${cleanTitle}" locally`);
+      return;
+    }
+
     const accessToken = requireToken();
     if (!accessToken) return;
-    const cleanTitle = docTitle.trim() || task.title.trim() || 'Untitled Task Document';
 
     setPendingConfirmation({
       title: `Create Google Doc for "${task.title || 'Untitled task'}"?`,
@@ -1051,13 +2011,52 @@ export default function App() {
   };
 
   const handleCreateMissingTaskDocs = (project: ProjectWorkspace) => {
-    const accessToken = requireToken();
-    if (!accessToken) return;
     const unlinked = project.tasks.filter((t) => !t.docId);
     if (unlinked.length === 0) {
-      showToast('Every task already has a linked Google Doc.');
+      showToast('Every task already has a linked document.');
       return;
     }
+
+    if (isGuestMode) {
+      const nowIso = new Date().toISOString();
+      const newDriveItems: DriveFileItem[] = [];
+      updateLocalProject(project.id, (p) => ({
+        ...p,
+        tasks: p.tasks.map((t) => {
+          if (t.docId) return t;
+          const localDocId = uid('local_tdoc');
+          const cleanTitle = t.title.trim() || 'Untitled task';
+          const blocks = buildTaskDocStarterBlocks(t, 'spec');
+          newDriveItems.push({
+            id: localDocId,
+            name: cleanTitle,
+            mimeType: 'application/vnd.google-apps.document',
+            modifiedTime: nowIso,
+            appProperties: { folioTaskDoc: 'true', folioTaskId: t.id },
+          });
+          return {
+            ...t,
+            docId: localDocId,
+            docUrl: '',
+            docTitle: cleanTitle,
+            docBlocks: blocks,
+            dirtyTaskDoc: false,
+          };
+        }),
+        driveFiles: [...newDriveItems, ...p.driveFiles],
+        lastSyncedAt: nowIso,
+      }));
+      logActivity(
+        project.title,
+        'Docs',
+        `Created ${unlinked.length} local task document(s)`
+      );
+      showToast(`Created ${unlinked.length} local task document(s)`);
+      return;
+    }
+
+    const accessToken = requireToken();
+    if (!accessToken) return;
 
     setPendingConfirmation({
       title: `Create ${unlinked.length} Google Doc${unlinked.length > 1 ? 's' : ''} for unlinked tasks?`,
@@ -1144,6 +2143,23 @@ export default function App() {
   // Standalone Google Doc Pages handlers
   const handleLoadExtraDoc = useCallback(
     async (project: ProjectWorkspace, doc: ProjectDocPage) => {
+      if (isGuestMode) {
+        if (!doc.blocks || doc.blocks.length === 0) {
+          updateLocalProject(project.id, (p) => ({
+            ...p,
+            extraDocs: p.extraDocs.map((d) =>
+              d.id === doc.id
+                ? {
+                    ...d,
+                    blocks: buildStandaloneDocStarterBlocks(d.title, 'blank'),
+                    dirty: false,
+                  }
+                : d
+            ),
+          }));
+        }
+        return;
+      }
       const accessToken = requireToken();
       if (!accessToken) return;
       setLoadingExtraDocIds((prev) => ({ ...prev, [doc.id]: true }));
@@ -1172,15 +2188,23 @@ export default function App() {
         setLoadingExtraDocIds((prev) => ({ ...prev, [doc.id]: false }));
       }
     },
-    [handleApiError, requireToken, updateLocalProject]
+    [handleApiError, isGuestMode, requireToken, updateLocalProject]
   );
 
   const executePullExtraDoc = async (project: ProjectWorkspace, doc: ProjectDocPage) => {
     await handleLoadExtraDoc(project, doc);
-    showToast(`Pulled latest Google Doc for "${doc.title}"`);
+    showToast(
+      isGuestMode
+        ? `"${doc.title}" is saved locally`
+        : `Pulled latest Google Doc for "${doc.title}"`
+    );
   };
 
   const handlePullExtraDoc = async (project: ProjectWorkspace, doc: ProjectDocPage) => {
+    if (isGuestMode) {
+      await executePullExtraDoc(project, doc);
+      return;
+    }
     if (doc.dirty) {
       setPendingConfirmation({
         title: `Discard unsynced edits in "${doc.title}"?`,
@@ -1199,6 +2223,19 @@ export default function App() {
   const handlePushExtraDoc = (project: ProjectWorkspace, doc: ProjectDocPage) => {
     if (!doc.blocks) return;
     const blocksSnapshot = doc.blocks;
+    if (isGuestMode) {
+      updateLocalProject(project.id, (p) => ({
+        ...p,
+        lastSyncedAt: new Date().toISOString(),
+        extraDocs: p.extraDocs.map((d) =>
+          d.id === doc.id ? { ...d, dirty: false } : d
+        ),
+      }));
+      logActivity(project.title, 'Docs', `Saved doc page "${doc.title}" locally`);
+      showToast(`Saved "${doc.title}" to local storage`);
+      return;
+    }
+
     setPendingConfirmation({
       title: `Save "${doc.title}" to Google Docs?`,
       description:
@@ -1237,9 +2274,39 @@ export default function App() {
     title: string,
     blocks: DocBlock[]
   ) => {
+    const cleanTitle = title.trim() || 'Untitled Document';
+    if (isGuestMode) {
+      const nowIso = new Date().toISOString();
+      const createdDoc: ProjectDocPage = {
+        id: uid('local_pdoc'),
+        title: cleanTitle,
+        url: '',
+        parentDocId: null,
+        modifiedTime: nowIso,
+        blocks,
+        dirty: false,
+      };
+      const newDriveItem: DriveFileItem = {
+        id: createdDoc.id,
+        name: createdDoc.title,
+        mimeType: 'application/vnd.google-apps.document',
+        modifiedTime: nowIso,
+      };
+      updateLocalProject(project.id, (p) => ({
+        ...p,
+        extraDocs: [createdDoc, ...p.extraDocs],
+        driveFiles: [newDriveItem, ...p.driveFiles],
+        lastSyncedAt: nowIso,
+      }));
+      setActiveTab('docs');
+      setSelectedExtraDocId(createdDoc.id);
+      logActivity(project.title, 'Docs', `Created local doc page "${createdDoc.title}"`);
+      showToast(`Created document "${createdDoc.title}" locally`);
+      return;
+    }
+
     const accessToken = requireToken();
     if (!accessToken) return;
-    const cleanTitle = title.trim() || 'Untitled Document';
 
     setPendingConfirmation({
       title: `Create Google Doc "${cleanTitle}"?`,
@@ -1292,9 +2359,106 @@ export default function App() {
     title: string,
     replaceBlockId?: string
   ) => {
+    const cleanTitle = title.trim() || 'Untitled Sub-page';
+
+    const insertPageBlockHelper = (
+      blocks: DocBlock[],
+      pageBlock: DocBlock
+    ): DocBlock[] => {
+      if (replaceBlockId) {
+        const idx = blocks.findIndex((b) => b.id === replaceBlockId);
+        if (idx !== -1) {
+          const target = blocks[idx];
+          const next = [...blocks];
+          if (!target.content.trim()) {
+            next[idx] = pageBlock;
+          } else {
+            next.splice(idx + 1, 0, pageBlock);
+          }
+          return next;
+        }
+      }
+      return [...blocks, pageBlock];
+    };
+
+    if (isGuestMode) {
+      const nowIso = new Date().toISOString();
+      const starterBlocks = buildStandaloneDocStarterBlocks(cleanTitle, 'spec');
+      const createdDoc: ProjectDocPage = {
+        id: uid('local_subdoc'),
+        title: cleanTitle,
+        url: '',
+        parentDocId,
+        modifiedTime: nowIso,
+        blocks: starterBlocks,
+        dirty: false,
+      };
+      const pageBlock: DocBlock = {
+        id: uid('blk'),
+        type: 'page',
+        content: createdDoc.title,
+        docId: createdDoc.id,
+        docUrl: '',
+      };
+      const newDriveItem: DriveFileItem = {
+        id: createdDoc.id,
+        name: createdDoc.title,
+        mimeType: 'application/vnd.google-apps.document',
+        modifiedTime: nowIso,
+      };
+
+      updateLocalProject(project.id, (p) => {
+        const nextExtraDocs =
+          parentTarget.kind === 'extraDoc'
+            ? p.extraDocs.map((d) =>
+                d.id === parentTarget.docId
+                  ? {
+                      ...d,
+                      blocks: insertPageBlockHelper(d.blocks || [], pageBlock),
+                      dirty: false,
+                    }
+                  : d
+              )
+            : p.extraDocs;
+
+        return {
+          ...p,
+          blocks:
+            parentTarget.kind === 'brief'
+              ? insertPageBlockHelper(p.blocks, pageBlock)
+              : p.blocks,
+          dirtyDoc: parentTarget.kind === 'brief' ? false : p.dirtyDoc,
+          tasks:
+            parentTarget.kind === 'task'
+              ? p.tasks.map((t) =>
+                  t.id === parentTarget.taskId
+                    ? {
+                        ...t,
+                        docBlocks: insertPageBlockHelper(t.docBlocks || [], pageBlock),
+                        dirtyTaskDoc: false,
+                      }
+                    : t
+                )
+              : p.tasks,
+          extraDocs: [createdDoc, ...nextExtraDocs],
+          driveFiles: [newDriveItem, ...p.driveFiles],
+          lastSyncedAt: nowIso,
+        };
+      });
+
+      setActiveTab('docs');
+      setSelectedExtraDocId(createdDoc.id);
+      logActivity(
+        project.title,
+        'Docs',
+        `Created local sub-page "${createdDoc.title}" inside "${parentTitle}"`
+      );
+      showToast(`Created sub-page "${createdDoc.title}" locally`);
+      return;
+    }
+
     const accessToken = requireToken();
     if (!accessToken) return;
-    const cleanTitle = title.trim() || 'Untitled Sub-page';
 
     setPendingConfirmation({
       title: `Create sub-page "${cleanTitle}" inside "${parentTitle}"?`,
@@ -1327,22 +2491,8 @@ export default function App() {
           docUrl: createdDoc.url,
         };
 
-        const insertPageBlock = (blocks: DocBlock[]): DocBlock[] => {
-          if (replaceBlockId) {
-            const idx = blocks.findIndex((b) => b.id === replaceBlockId);
-            if (idx !== -1) {
-              const target = blocks[idx];
-              const next = [...blocks];
-              if (!target.content.trim()) {
-                next[idx] = pageBlock;
-              } else {
-                next.splice(idx + 1, 0, pageBlock);
-              }
-              return next;
-            }
-          }
-          return [...blocks, pageBlock];
-        };
+        const insertPageBlock = (blocks: DocBlock[]): DocBlock[] =>
+          insertPageBlockHelper(blocks, pageBlock);
 
         const latestProject =
           projectsRef.current.find((p) => p.id === project.id) || project;
@@ -1447,12 +2597,92 @@ export default function App() {
     mode: 'import-project' | 'link-to-project' | 'link-to-task' | 'link-extra-doc',
     targetTaskId?: string
   ) => {
-    const accessToken = requireToken();
-    if (!accessToken) return;
-
     const isFolder = file.mimeType === 'application/vnd.google-apps.folder';
     const isSheet = file.mimeType === 'application/vnd.google-apps.spreadsheet';
     const isDoc = file.mimeType === 'application/vnd.google-apps.document';
+
+    if (isGuestMode) {
+      if (mode === 'link-extra-doc' && activeProject && isDoc) {
+        const docPage: ProjectDocPage = {
+          id: file.id,
+          title: file.name,
+          url: file.webViewLink || '',
+          blocks: buildStandaloneDocStarterBlocks(file.name, 'blank'),
+          dirty: false,
+          modifiedTime: file.modifiedTime,
+        };
+        updateLocalProject(activeProject.id, (p) => ({
+          ...p,
+          extraDocs: p.extraDocs.some((d) => d.id === file.id)
+            ? p.extraDocs.map((d) => (d.id === file.id ? docPage : d))
+            : [docPage, ...p.extraDocs],
+        }));
+        setActiveTab('docs');
+        setSelectedExtraDocId(file.id);
+        showToast(`Linked local document "${file.name}"`);
+        return;
+      }
+
+      if (mode === 'link-to-task' && activeProject && targetTaskId && isDoc) {
+        updateLocalProject(activeProject.id, (p) => ({
+          ...p,
+          tasks: p.tasks.map((t) =>
+            t.id === targetTaskId
+              ? {
+                  ...t,
+                  docId: file.id,
+                  docTitle: file.name,
+                  docUrl: file.webViewLink || '',
+                  docBlocks:
+                    t.docBlocks && t.docBlocks.length > 0
+                      ? t.docBlocks
+                      : buildStandaloneDocStarterBlocks(file.name, 'blank'),
+                  dirtyTaskDoc: false,
+                }
+              : t
+          ),
+        }));
+        showToast(`Linked local document "${file.name}" to task`);
+        return;
+      }
+
+      const existing = projects.find(
+        (p) =>
+          p.id === file.id ||
+          p.driveFolderId === file.id ||
+          p.sheetId === file.id ||
+          p.docId === file.id ||
+          p.driveFiles.some((df) => df.id === file.id)
+      );
+      if (existing) {
+        setActiveProjectId(existing.id);
+        setActiveArea('project');
+        showToast(`Opened "${existing.title}"`);
+        return;
+      }
+
+      const matchingStandalone = standalonePages.find((pg) => pg.id === file.id);
+      if (matchingStandalone) {
+        setActiveStandalonePageId(matchingStandalone.id);
+        setActiveArea('standalone-page');
+        showToast(`Opened "${matchingStandalone.title}"`);
+        return;
+      }
+
+      const created = createLocalWorkspaceProject(
+        file.name,
+        isFolder ? '📁' : isSheet ? '📊' : '📝',
+        projects.length
+      );
+      setProjects((prev) => [created, ...prev]);
+      setActiveProjectId(created.id);
+      setActiveArea('project');
+      showToast(`Opened "${file.name}" as a local project`);
+      return;
+    }
+
+    const accessToken = requireToken();
+    if (!accessToken) return;
 
     if (mode === 'link-extra-doc' && activeProject && isDoc) {
       const docData = await fetchDocBlocks(accessToken, file.id);
@@ -1711,10 +2941,46 @@ export default function App() {
     }
   };
 
+  const allLocalFiles = useMemo<DriveFileItem[]>(() => {
+    const map = new Map<string, DriveFileItem>();
+    for (const p of projects) {
+      if (p.driveFolderId) {
+        map.set(p.driveFolderId, {
+          id: p.driveFolderId,
+          name: p.driveFolderName || p.title,
+          mimeType: 'application/vnd.google-apps.folder',
+          modifiedTime: p.lastSyncedAt || new Date().toISOString(),
+        });
+      }
+      for (const f of p.driveFiles) {
+        map.set(f.id, f);
+      }
+    }
+    for (const pg of standalonePages) {
+      map.set(pg.id, {
+        id: pg.id,
+        name: pg.title,
+        mimeType: 'application/vnd.google-apps.document',
+        modifiedTime: pg.modifiedTime || pg.lastSyncedAt || new Date().toISOString(),
+      });
+    }
+    return Array.from(map.values());
+  }, [projects, standalonePages]);
+
+  const handleExportLocalBackup = useCallback(() => {
+    exportGuestWorkspaceToFile({
+      projects,
+      standalonePages,
+      folderGroups,
+    });
+    showToast('Downloaded local workspace backup (.json)');
+  }, [projects, standalonePages, folderGroups, showToast]);
+
   if (needsAuth || !user) {
     return (
       <AuthScreen
         onSignIn={handleLogin}
+        onGuestSignIn={handleGuestLogin}
         isSigningIn={isSigningIn}
         errorMessage={authError}
         darkMode={darkMode}
@@ -1733,6 +2999,10 @@ export default function App() {
   const viewKey =
     activeArea === 'project'
       ? `project-${activeProjectId || 'none'}`
+      : activeArea === 'folder-group'
+      ? `folder-${activeGroupId || 'none'}`
+      : activeArea === 'standalone-page'
+      ? `page-${activeStandalonePageId || 'none'}`
       : activeArea;
 
   return (
@@ -1740,9 +3010,14 @@ export default function App() {
     <div className="flex h-screen overflow-hidden bg-white text-[#191918] dark:bg-[#191918] dark:text-[#EDEDEC]">
       <NotionSidebar
         user={user}
+        isGuestMode={isGuestMode}
         projects={projects}
+        folderGroups={folderGroups}
+        standalonePages={standalonePages}
         activeArea={activeArea}
         activeProjectId={activeProjectId}
+        activeGroupId={activeGroupId}
+        activeStandalonePageId={activeStandalonePageId}
         activeTab={activeTab}
         isOpen={sidebarOpen}
         darkMode={darkMode}
@@ -1756,10 +3031,37 @@ export default function App() {
           setActiveTab(tab);
           setSelectedExtraDocId(null);
         }}
-        onCreateProject={() => setNewProjectOpen(true)}
+        onSelectFolderGroup={(groupId) => {
+          setActiveGroupId(groupId);
+          setActiveArea('folder-group');
+        }}
+        onSelectStandalonePage={(pageId) => {
+          setActiveStandalonePageId(pageId);
+          setActiveArea('standalone-page');
+        }}
+        onCreateProject={(defaultGroupId = null) => {
+          setPendingProjectGroupId(defaultGroupId);
+          setNewProjectOpen(true);
+        }}
+        onCreateFolderGroup={handleCreateFolderGroup}
+        onDeleteFolderGroup={handleDeleteFolderGroup}
+        onAssignProjectToGroup={handleAssignProjectToGroup}
+        onCreateStandalonePage={() =>
+          handleCreateWorkspaceStandalonePage(null, 'Untitled Page')
+        }
+        onAddStandalonePageToProject={handleAddStandalonePageToProject}
+        onRemoveProjectFromWorkspace={handleRemoveProjectFromWorkspace}
+        onDeleteProjectPermanently={handleDeleteProjectPermanently}
+        onRemoveStandalonePageFromWorkspace={
+          handleRemoveStandalonePageFromWorkspace
+        }
+        onDeleteStandalonePagePermanently={
+          handleDeleteStandalonePagePermanently
+        }
         onImportFromDrive={() =>
           setLinkModalState({ open: true, mode: 'import-project' })
         }
+        onConnectGoogle={handleLogin}
         onLogout={handleLogout}
       />
 
@@ -1806,6 +3108,19 @@ export default function App() {
                 Daily Tasks, Habits & Notes
               </span>
             )}
+            {activeArea === 'folder-group' && activeFolderGroup && (
+              <span className="flex items-center gap-1.5 truncate font-medium text-neutral-900 dark:text-neutral-100">
+                <span>{activeFolderGroup.icon}</span>
+                <span className="truncate">{activeFolderGroup.name}</span>
+                <span className="text-neutral-400 font-normal">· Gallery</span>
+              </span>
+            )}
+            {activeArea === 'standalone-page' && activeStandalonePage && (
+              <span className="flex items-center gap-1.5 truncate font-medium text-neutral-900 dark:text-neutral-100">
+                <span>{activeStandalonePage.icon}</span>
+                <span className="truncate">{activeStandalonePage.title}</span>
+              </span>
+            )}
             {activeArea === 'sync-hub' && (
               <span className="truncate text-neutral-700 dark:text-neutral-300">
                 Workspace Sync Hub
@@ -1818,6 +3133,34 @@ export default function App() {
             )}
             {activeArea === 'project' && activeProject && (
               <>
+                {activeProject.groupId &&
+                  (() => {
+                    const grp = folderGroups.find(
+                      (g) => g.id === activeProject.groupId
+                    );
+                    if (!grp) return null;
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveGroupId(grp.id);
+                            setActiveArea('folder-group');
+                          }}
+                          className="flex items-center gap-1 text-neutral-600 hover:underline dark:text-neutral-400 whitespace-nowrap shrink-0"
+                        >
+                          <span>{grp.icon}</span>
+                          <span>{grp.name}</span>
+                        </button>
+                        <span
+                          aria-hidden="true"
+                          className="text-neutral-300 dark:text-neutral-700"
+                        >
+                          /
+                        </span>
+                      </>
+                    );
+                  })()}
                 <span className="flex items-center gap-1.5 truncate font-medium text-neutral-900 dark:text-neutral-100">
                   <span>{activeProject.icon}</span>
                   <span className="truncate">{activeProject.title}</span>
@@ -1981,6 +3324,29 @@ export default function App() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
+                    onClick={() =>
+                      handleCreateWorkspaceStandalonePage(null, 'Untitled Page')
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+                  >
+                    <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>+ Standalone Page</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCreateFolderGroup(
+                        `Project Group ${folderGroups.length + 1}`,
+                        '📁'
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+                  >
+                    <Folder className="h-3.5 w-3.5 text-amber-600" />
+                    <span>+ New Folder</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setActiveArea('daily-planner')}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
                   >
@@ -2047,6 +3413,101 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Folder Groups Section on Overview */}
+              {folderGroups.length > 0 && (
+                <div>
+                  <div className="mb-3.5 flex items-center justify-between">
+                    <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                      Project Folders & Groups
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCreateFolderGroup(
+                          `Project Group ${folderGroups.length + 1}`,
+                          '📁'
+                        )
+                      }
+                      className="inline-flex items-center gap-1 text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>New Folder</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {folderGroups.map((grp) => {
+                      const grpProjects = projects.filter(
+                        (p) => p.groupId === grp.id
+                      );
+                      const grpTasks = grpProjects.reduce(
+                        (sum, p) => sum + p.tasks.length,
+                        0
+                      );
+                      const grpDone = grpProjects.reduce(
+                        (sum, p) =>
+                          sum + p.tasks.filter((t) => t.status === 'Done').length,
+                        0
+                      );
+                      return (
+                        <button
+                          key={grp.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveGroupId(grp.id);
+                            setActiveArea('folder-group');
+                          }}
+                          className="group flex flex-col justify-between rounded-xl border border-neutral-200 bg-[#F8F8F7] p-4 text-left transition-all hover:border-neutral-300 hover:bg-white hover:shadow-xs dark:border-neutral-800 dark:bg-[#20201E] dark:hover:border-neutral-700"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-2.5">
+                                <span className="text-xl">{grp.icon}</span>
+                                <span className="font-display text-base font-semibold text-neutral-900 group-hover:underline dark:text-neutral-100">
+                                  {grp.name}
+                                </span>
+                              </span>
+                              <span className="rounded-md bg-white px-2 py-0.5 font-mono text-xs tabular-nums text-neutral-600 dark:bg-[#191918] dark:text-neutral-300">
+                                {grpProjects.length} project{grpProjects.length === 1 ? '' : 's'}
+                              </span>
+                            </div>
+                            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                              {grpProjects.length === 0 ? (
+                                <span className="text-xs text-neutral-400">
+                                  Empty folder · Click to open gallery
+                                </span>
+                              ) : (
+                                grpProjects.slice(0, 3).map((gp) => (
+                                  <span
+                                    key={gp.id}
+                                    className="inline-flex items-center gap-1 rounded-md border border-neutral-200/80 bg-white px-2 py-0.5 text-[11px] text-neutral-700 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-300"
+                                  >
+                                    <span>{gp.icon}</span>
+                                    <span className="max-w-[110px] truncate">{gp.title}</span>
+                                  </span>
+                                ))
+                              )}
+                              {grpProjects.length > 3 && (
+                                <span className="text-[11px] text-neutral-400">
+                                  +{grpProjects.length - 3} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-3 flex items-center justify-between border-t border-neutral-200/70 pt-2.5 text-xs text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                            <span className="tabular-nums">
+                              {grpDone}/{grpTasks} tasks done
+                            </span>
+                            <span className="font-medium text-neutral-700 group-hover:text-neutral-900 dark:text-neutral-300">
+                              Open Gallery →
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Projects Grid or Empty State */}
               {projects.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-[#F8F8F7] px-6 py-16 text-center dark:border-neutral-800 dark:bg-[#20201E]">
@@ -2098,6 +3559,11 @@ export default function App() {
                     {projects.map((p, idx) => {
                       const done = p.tasks.filter((t) => t.status === 'Done').length;
                       const fallback = getCoverPresetByIndex(idx).fallbackGradient;
+                      const isMenuOpen = openOverviewMenuId === p.id;
+                      const assignedFolder = p.groupId
+                        ? folderGroups.find((g) => g.id === p.groupId)
+                        : null;
+
                       return (
                         <motion.div
                           key={p.id}
@@ -2109,7 +3575,7 @@ export default function App() {
                             ease: [0.16, 1, 0.3, 1],
                           }}
                           whileHover={{ y: -2 }}
-                          className="group flex flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white transition-colors hover:border-neutral-300 hover:shadow-sm dark:border-neutral-800 dark:bg-[#20201E] dark:hover:border-neutral-700"
+                          className="group relative flex flex-col overflow-visible rounded-xl border border-neutral-200 bg-white transition-colors hover:border-neutral-300 hover:shadow-sm dark:border-neutral-800 dark:bg-[#20201E] dark:hover:border-neutral-700"
                         >
                           <div
                             onClick={() => {
@@ -2117,7 +3583,7 @@ export default function App() {
                               setActiveArea('project');
                               setActiveTab('page');
                             }}
-                            className="h-28 w-full cursor-pointer overflow-hidden border-b border-neutral-200 dark:border-neutral-800"
+                            className="h-28 w-full cursor-pointer overflow-hidden rounded-t-xl border-b border-neutral-200 dark:border-neutral-800"
                             style={{ background: fallback }}
                           >
                             {p.coverUrl && (
@@ -2130,22 +3596,141 @@ export default function App() {
                             )}
                           </div>
 
+                          {/* 3-Dot Project Action Menu on Overview Card */}
+                          <div className="absolute right-2.5 top-2.5 z-20">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenOverviewMenuId(isMenuOpen ? null : p.id);
+                              }}
+                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-neutral-200/80 bg-white/90 text-neutral-700 shadow-xs backdrop-blur-xs transition-colors hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-200"
+                              title="Project options (Add page, Move to folder, Remove, Delete)"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
+
+                            <AnimatePresence>
+                              {isMenuOpen && (
+                                <motion.div
+                                  initial={{ opacity: 0, y: 4, scale: 0.96 }}
+                                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                                  exit={{ opacity: 0, y: 4, scale: 0.96 }}
+                                  className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl dark:border-neutral-700 dark:bg-[#242422]"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenOverviewMenuId(null);
+                                      handleAddStandalonePageToProject(p.id);
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                                  >
+                                    <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                                    <span>Add Standalone Page</span>
+                                  </button>
+
+                                  {folderGroups.length > 0 && (
+                                    <>
+                                      <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+                                      <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                                        Folder Group
+                                      </div>
+                                      {p.groupId && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setOpenOverviewMenuId(null);
+                                            handleAssignProjectToGroup(p.id, null);
+                                          }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                                        >
+                                          <FolderMinus className="h-3.5 w-3.5 text-neutral-500" />
+                                          <span>Remove from Folder</span>
+                                        </button>
+                                      )}
+                                      {folderGroups
+                                        .filter((g) => g.id !== p.groupId)
+                                        .map((g) => (
+                                          <button
+                                            key={g.id}
+                                            type="button"
+                                            onClick={() => {
+                                              setOpenOverviewMenuId(null);
+                                              handleAssignProjectToGroup(p.id, g.id);
+                                            }}
+                                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                                          >
+                                            <FolderInput className="h-3.5 w-3.5 text-neutral-500" />
+                                            <span className="truncate">
+                                              Move to {g.icon} {g.name}
+                                            </span>
+                                          </button>
+                                        ))}
+                                    </>
+                                  )}
+
+                                  <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenOverviewMenuId(null);
+                                      handleRemoveProjectFromWorkspace(p);
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                                  >
+                                    <EyeOff className="h-3.5 w-3.5 text-amber-600" />
+                                    <span>Remove from Here (Keep in Drive)</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenOverviewMenuId(null);
+                                      handleDeleteProjectPermanently(p);
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    <span>Delete Permanently from Drive</span>
+                                  </button>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+
                           <div className="flex flex-1 flex-col justify-between p-4">
                             <div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActiveProjectId(p.id);
-                                  setActiveArea('project');
-                                  setActiveTab('page');
-                                }}
-                                className="flex items-center gap-2 text-left"
-                              >
-                                <span className="text-lg">{p.icon}</span>
-                                <h3 className="font-display text-base font-semibold text-neutral-900 hover:underline dark:text-neutral-100">
-                                  {p.title}
-                                </h3>
-                              </button>
+                              <div className="flex items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveProjectId(p.id);
+                                    setActiveArea('project');
+                                    setActiveTab('page');
+                                  }}
+                                  className="flex min-w-0 items-center gap-2 text-left"
+                                >
+                                  <span className="text-lg">{p.icon}</span>
+                                  <h3 className="truncate font-display text-base font-semibold text-neutral-900 hover:underline dark:text-neutral-100">
+                                    {p.title}
+                                  </h3>
+                                </button>
+                                {assignedFolder && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveGroupId(assignedFolder.id);
+                                      setActiveArea('folder-group');
+                                    }}
+                                    className="shrink-0 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[11px] text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+                                    title={`Open folder "${assignedFolder.name}"`}
+                                  >
+                                    {assignedFolder.icon} {assignedFolder.name}
+                                  </button>
+                                )}
+                              </div>
 
                               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
                                 <span className="tabular-nums">
@@ -2213,6 +3798,198 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {/* Standalone Pages Section on Overview */}
+              <div>
+                <div className="mb-3.5 flex items-center justify-between">
+                  <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                    Standalone Pages ({standalonePages.length})
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCreateWorkspaceStandalonePage(null, 'Untitled Page')
+                    }
+                    className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Add Standalone Page</span>
+                  </button>
+                </div>
+                {standalonePages.length === 0 ? (
+                  <div className="flex items-center justify-between rounded-xl border border-dashed border-neutral-300 bg-[#F8F8F7] px-5 py-4 dark:border-neutral-800 dark:bg-[#20201E]">
+                    <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                      Create standalone Notion-style pages synced directly with Google Docs in your Folio Workspace folder.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCreateWorkspaceStandalonePage(null, 'Untitled Page')
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-800 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-200 shrink-0"
+                    >
+                      <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>Create Standalone Page</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {standalonePages.map((pg) => (
+                      <div
+                        key={pg.id}
+                        className="group flex items-center justify-between gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-3 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:bg-[#20201E] dark:hover:border-neutral-700"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveStandalonePageId(pg.id);
+                            setActiveArea('standalone-page');
+                          }}
+                          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                        >
+                          <span className="text-lg">{pg.icon}</span>
+                          <div className="min-w-0">
+                            <div className="truncate font-display text-sm font-semibold text-neutral-900 group-hover:underline dark:text-neutral-100">
+                              {pg.title}
+                            </div>
+                            <div className="text-[11px] text-neutral-400">
+                              {pg.blocks.length} block{pg.blocks.length === 1 ? '' : 's'} · Google Doc
+                            </div>
+                          </div>
+                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleRemoveStandalonePageFromWorkspace(pg)
+                            }
+                            className="rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-neutral-700 group-hover:opacity-100 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                            title="Remove from here (keep in Drive)"
+                          >
+                            <EyeOff className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleDeleteStandalonePagePermanently(pg)
+                            }
+                            className="rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                            title="Delete permanently from Drive"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          ) : activeArea === 'folder-group' && activeFolderGroup ? (
+            <motion.div
+              key={viewKey}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <FolderGalleryView
+                group={activeFolderGroup}
+                allGroups={folderGroups}
+                projectsInGroup={projects.filter(
+                  (p) => p.groupId === activeFolderGroup.id
+                )}
+                availableProjects={projects.filter(
+                  (p) => p.groupId !== activeFolderGroup.id
+                )}
+                fullWidth={fullWidthCanvas}
+                onRenameGroup={handleRenameFolderGroup}
+                onChangeGroupIcon={handleChangeFolderGroupIcon}
+                onDeleteGroup={handleDeleteFolderGroup}
+                onOpenProject={(projectId, tab = 'page') => {
+                  setActiveProjectId(projectId);
+                  setActiveArea('project');
+                  setActiveTab(tab);
+                  setSelectedExtraDocId(null);
+                }}
+                onCreateProjectInGroup={(groupId) => {
+                  setPendingProjectGroupId(groupId);
+                  setNewProjectOpen(true);
+                }}
+                onAssignProjectToGroup={handleAssignProjectToGroup}
+                onAddStandalonePageToProject={handleAddStandalonePageToProject}
+                onRemoveProjectFromWorkspace={handleRemoveProjectFromWorkspace}
+                onDeleteProjectPermanently={handleDeleteProjectPermanently}
+                hasProjectDirty={hasProjectDirty}
+              />
+            </motion.div>
+          ) : activeArea === 'standalone-page' && activeStandalonePage ? (
+            <motion.div
+              key={viewKey}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <StandalonePageView
+                page={activeStandalonePage}
+                allPages={standalonePages}
+                isPulling={Boolean(pullingStandaloneIds[activeStandalonePage.id])}
+                isSyncing={Boolean(syncingStandaloneIds[activeStandalonePage.id])}
+                autoSyncEnabled={autoSyncEnabled}
+                fullWidth={fullWidthCanvas}
+                onTitleChange={(title) =>
+                  setStandalonePages((prev) =>
+                    prev.map((pg) =>
+                      pg.id === activeStandalonePage.id
+                        ? { ...pg, title, dirty: true }
+                        : pg
+                    )
+                  )
+                }
+                onIconChange={(icon) =>
+                  setStandalonePages((prev) =>
+                    prev.map((pg) =>
+                      pg.id === activeStandalonePage.id ? { ...pg, icon } : pg
+                    )
+                  )
+                }
+                onCoverChange={(coverUrl) =>
+                  setStandalonePages((prev) =>
+                    prev.map((pg) =>
+                      pg.id === activeStandalonePage.id ? { ...pg, coverUrl } : pg
+                    )
+                  )
+                }
+                onBlocksChange={(blocks) =>
+                  setStandalonePages((prev) =>
+                    prev.map((pg) =>
+                      pg.id === activeStandalonePage.id
+                        ? { ...pg, blocks, dirty: true }
+                        : pg
+                    )
+                  )
+                }
+                onPullPage={() => handlePullStandalonePage(activeStandalonePage)}
+                onPushPage={() => handlePushStandalonePage(activeStandalonePage)}
+                onCreateSubPage={(title, replaceBlockId) =>
+                  handleCreateWorkspaceStandalonePage(
+                    activeStandalonePage.id,
+                    title,
+                    replaceBlockId
+                  )
+                }
+                onOpenPage={(pageId) => {
+                  setActiveStandalonePageId(pageId);
+                  setActiveArea('standalone-page');
+                }}
+                onRemoveFromWorkspace={() =>
+                  handleRemoveStandalonePageFromWorkspace(activeStandalonePage)
+                }
+                onDeletePermanently={() =>
+                  handleDeleteStandalonePagePermanently(activeStandalonePage)
+                }
+              />
             </motion.div>
           ) : activeArea === 'daily-planner' ? (
             <motion.div
@@ -2262,10 +4039,13 @@ export default function App() {
             >
               <DriveBrowserView
                 token={token}
+                isGuestMode={isGuestMode}
+                localFiles={allLocalFiles}
                 rootFolderUrl={rootFolder?.webViewLink || null}
                 onImportAsProject={(file) =>
                   handleImportOrLinkFile(file, 'import-project')
                 }
+                onExportLocalBackup={handleExportLocalBackup}
               />
             </motion.div>
           ) : activeProject ? (
@@ -2398,6 +4178,16 @@ export default function App() {
                   handleRenameFile(activeProject, file, newName)
                 }
                 onTrashFile={(file) => handleTrashFile(activeProject, file)}
+                folderGroups={folderGroups}
+                onAssignProjectToGroup={(groupId) =>
+                  handleAssignProjectToGroup(activeProject.id, groupId)
+                }
+                onRemoveProjectFromWorkspace={() =>
+                  handleRemoveProjectFromWorkspace(activeProject)
+                }
+                onDeleteProjectPermanently={() =>
+                  handleDeleteProjectPermanently(activeProject)
+                }
                 fullWidth={fullWidthCanvas}
               />
             </motion.div>
@@ -2440,6 +4230,8 @@ export default function App() {
         mode={linkModalState.mode}
         taskTitle={linkModalState.targetTaskTitle}
         token={token}
+        isGuestMode={isGuestMode}
+        localFiles={allLocalFiles}
         onClose={() => setLinkModalState((prev) => ({ ...prev, open: false }))}
         onSelectFile={(file) =>
           handleImportOrLinkFile(

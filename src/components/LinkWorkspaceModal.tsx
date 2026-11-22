@@ -17,6 +17,8 @@ interface LinkWorkspaceModalProps {
   mode: 'import-project' | 'link-to-project' | 'link-to-task' | 'link-extra-doc';
   taskTitle?: string;
   token: string | null;
+  isGuestMode?: boolean;
+  localFiles?: DriveFileItem[];
   onClose: () => void;
   onSelectFile: (file: DriveFileItem) => Promise<void>;
 }
@@ -26,6 +28,8 @@ export const LinkWorkspaceModal: React.FC<LinkWorkspaceModalProps> = ({
   mode,
   taskTitle,
   token,
+  isGuestMode = false,
+  localFiles = [],
   onClose,
   onSelectFile,
 }) => {
@@ -55,7 +59,26 @@ export const LinkWorkspaceModal: React.FC<LinkWorkspaceModalProps> = ({
   }, [isOpen, mode]);
 
   useEffect(() => {
-    if (!isOpen || !token) return;
+    if (!isOpen) return;
+    if (isGuestMode) {
+      const q = query.trim().toLowerCase();
+      const filtered = localFiles.filter((f) => {
+        if (q && !f.name.toLowerCase().includes(q)) return false;
+        if (filter === 'folder') {
+          return f.mimeType === 'application/vnd.google-apps.folder';
+        }
+        if (filter === 'sheet') {
+          return f.mimeType === 'application/vnd.google-apps.spreadsheet';
+        }
+        if (filter === 'doc') {
+          return f.mimeType === 'application/vnd.google-apps.document';
+        }
+        return true;
+      });
+      setResults(filtered);
+      return;
+    }
+    if (!token) return;
     let active = true;
     const run = async () => {
       setLoading(true);
@@ -76,7 +99,7 @@ export const LinkWorkspaceModal: React.FC<LinkWorkspaceModalProps> = ({
       active = false;
       clearTimeout(timer);
     };
-  }, [isOpen, token, query, filter]);
+  }, [isOpen, token, isGuestMode, localFiles, query, filter]);
 
   const handlePick = async (file: DriveFileItem) => {
     setSelectingId(file.id);
