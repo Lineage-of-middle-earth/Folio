@@ -12,7 +12,8 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { DriveFileItem, ProjectWorkspace } from '../types/workspace';
+import { DocBlock, DriveFileItem, ProjectWorkspace } from '../types/workspace';
+import { DriveGuidelinePanel } from './DriveGuidelinePanel';
 
 interface DriveFilesPanelProps {
   project: ProjectWorkspace;
@@ -21,6 +22,7 @@ interface DriveFilesPanelProps {
   onLinkExistingFile: () => void;
   onRenameFile: (file: DriveFileItem, newName: string) => void;
   onTrashFile: (file: DriveFileItem) => void;
+  onCreateProjectDoc?: (title: string, blocks: DocBlock[]) => void;
 }
 
 function getFileIcon(mimeType: string) {
@@ -61,6 +63,7 @@ export const DriveFilesPanel: React.FC<DriveFilesPanelProps> = ({
   onLinkExistingFile,
   onRenameFile,
   onTrashFile,
+  onCreateProjectDoc,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -149,6 +152,17 @@ export const DriveFilesPanel: React.FC<DriveFilesPanelProps> = ({
           )}
         </div>
       </div>
+
+      <DriveGuidelinePanel
+        projects={[project]}
+        defaultProjectId={project.id}
+        compact
+        onCreateOrganizedDocument={
+          onCreateProjectDoc
+            ? (opts) => onCreateProjectDoc(opts.title, opts.blocks)
+            : undefined
+        }
+      />
 
       {project.driveFiles.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-[#F8F8F7] px-6 py-12 text-center dark:border-neutral-800 dark:bg-[#20201E]">

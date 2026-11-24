@@ -39,18 +39,10 @@ export const SyncHubView: React.FC<SyncHubViewProps> = ({
 }) => {
   return (
     <div className="mx-auto max-w-[1100px] space-y-8 px-6 py-8 lg:px-10">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Google Drive · Google Sheets · Google Docs
-          </p>
-          <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
-            Workspace Sync Hub
-          </h1>
-          <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            Automatic background polling refreshes Sheets and Docs on focus. Enable Auto-Sync to push your edits continuously.
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
+          Sync
+        </h1>
 
         <div className="flex flex-wrap items-center gap-2">
           <motion.button
@@ -60,21 +52,21 @@ export const SyncHubView: React.FC<SyncHubViewProps> = ({
             className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
           >
             <ArrowDownToLine className="h-3.5 w-3.5" />
-            <span>Refresh All</span>
+            <span>Refresh</span>
           </motion.button>
 
           <motion.button
             type="button"
             whileTap={{ scale: 0.96 }}
             onClick={onToggleAutoSync}
-            className={`inline-flex items-center gap-2 rounded-lg border px-3.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
               autoSyncEnabled
                 ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60'
                 : 'border-neutral-200 bg-neutral-900 text-white hover:bg-neutral-800 dark:border-neutral-700 dark:bg-blue-600 dark:hover:bg-blue-500'
             }`}
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            <span>{autoSyncEnabled ? 'Auto-Sync: On' : 'Enable Auto-Sync'}</span>
+            <span>{autoSyncEnabled ? 'Auto-Sync: On' : 'Auto-Sync: Off'}</span>
           </motion.button>
         </div>
       </div>
@@ -85,18 +77,18 @@ export const SyncHubView: React.FC<SyncHubViewProps> = ({
           <thead>
             <tr className="border-b border-neutral-200 bg-[#F8F8F7] text-neutral-500 dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-400">
               <th className="px-4 py-3 font-medium">Project</th>
-              <th className="px-4 py-3 font-medium">Google Drive</th>
-              <th className="px-4 py-3 font-medium">Google Sheet</th>
-              <th className="px-4 py-3 font-medium">Google Doc</th>
-              <th className="px-4 py-3 font-medium">State</th>
-              <th className="px-4 py-3 text-right font-medium">Sync Actions</th>
+              <th className="px-4 py-3 font-medium">Drive</th>
+              <th className="px-4 py-3 font-medium">Sheet</th>
+              <th className="px-4 py-3 font-medium">Doc</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
             {projects.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-neutral-500">
-                  No projects connected yet. Create or import a project from the sidebar.
+                <td colSpan={6} className="px-4 py-10 text-center text-neutral-400">
+                  No projects yet.
                 </td>
               </tr>
             ) : (
@@ -241,12 +233,12 @@ export const SyncHubView: React.FC<SyncHubViewProps> = ({
 
       {/* Real Session Sync History */}
       <div>
-        <h2 className="font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-          Session Sync History
+        <h2 className="font-display text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+          Recent Activity
         </h2>
         {activityLog.length === 0 ? (
-          <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-            Sync actions performed during this session will appear here.
+          <p className="mt-2 text-xs text-neutral-400">
+            No sync activity yet.
           </p>
         ) : (
           <div className="mt-3 divide-y divide-neutral-200 rounded-xl border border-neutral-200 bg-white dark:divide-neutral-800 dark:border-neutral-800 dark:bg-[#191918]">

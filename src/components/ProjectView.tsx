@@ -4,7 +4,6 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   CheckCircle2,
-  ExternalLink,
   EyeOff,
   FilePlus2,
   Files,
@@ -338,149 +337,99 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           />
         </div>
 
-        {/* Notion-Style Inline Workspace Properties */}
-        <div className="mt-4 divide-y divide-neutral-200/80 border-y border-neutral-200/80 text-xs dark:divide-neutral-800 dark:border-neutral-800">
-          <div className="grid grid-cols-1 gap-2 py-2.5 sm:grid-cols-12 sm:items-center">
-            <span className="text-neutral-500 dark:text-neutral-400 sm:col-span-3">
-              Google Drive
-            </span>
-            <div className="flex flex-wrap items-center gap-3 sm:col-span-9">
-              {project.driveFolderUrl ? (
-                <a
-                  href={project.driveFolderUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 font-medium text-neutral-800 hover:underline dark:text-neutral-200"
-                >
-                  <FolderOpen className="h-3.5 w-3.5 text-amber-600" />
-                  <span>{project.driveFolderName || project.title}</span>
-                  <ExternalLink className="h-3 w-3 text-neutral-400" />
-                </a>
-              ) : (
-                <span className="text-neutral-400">Standalone link</span>
-              )}
-              <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">
-                /
-              </span>
-              <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
-                {project.driveFiles.length} file(s)
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2 py-2.5 sm:grid-cols-12 sm:items-center">
-            <span className="text-neutral-500 dark:text-neutral-400 sm:col-span-3">
-              Connected Sheet
-            </span>
-            <div className="flex flex-wrap items-center gap-3 sm:col-span-9">
-              {project.sheetUrl ? (
-                <a
-                  href={project.sheetUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 font-medium text-neutral-800 hover:underline dark:text-neutral-200"
-                >
-                  <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
-                  <span>{project.sheetTitle || 'Tasks Sheet'}</span>
-                  <ExternalLink className="h-3 w-3 text-neutral-400" />
-                </a>
-              ) : (
-                <span className="text-neutral-400">No Sheet linked</span>
-              )}
-              <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">
-                ·
-              </span>
-              <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
-                {doneCount}/{project.tasks.length} tasks done
-              </span>
-              <button
-                type="button"
-                onClick={onLinkExistingFile}
-                className="inline-flex items-center gap-1 text-neutral-500 hover:text-neutral-900 hover:underline dark:text-neutral-400 dark:hover:text-neutral-100"
+        {/* Compact Single-Line Workspace Metadata Strip (Zero-Pill Discipline) */}
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+          {project.driveFolderUrl && (
+            <>
+              <a
+                href={project.driveFolderUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 hover:text-neutral-900 hover:underline dark:hover:text-neutral-100"
               >
-                <Link2 className="h-3 w-3" />
-                <span>Switch Sheet / Doc</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2 py-2.5 sm:grid-cols-12 sm:items-center">
-            <span className="text-neutral-500 dark:text-neutral-400 sm:col-span-3">
-              Connected Doc
+                <FolderOpen className="h-3.5 w-3.5 text-amber-600/90" />
+                <span>Drive</span>
+              </a>
+              <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+            </>
+          )}
+          {project.sheetUrl && (
+            <>
+              <a
+                href={project.sheetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 hover:text-neutral-900 hover:underline dark:hover:text-neutral-100"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600/90" />
+                <span>Sheet</span>
+              </a>
+              <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+            </>
+          )}
+          {project.docUrl && (
+            <>
+              <a
+                href={project.docUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 hover:text-neutral-900 hover:underline dark:hover:text-neutral-100"
+              >
+                <FileText className="h-3.5 w-3.5 text-blue-600/90" />
+                <span>Doc</span>
+              </a>
+              <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+            </>
+          )}
+          <span className="tabular-nums">
+            {doneCount}/{project.tasks.length} tasks
+          </span>
+          <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+          {isSyncing ? (
+            <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              <span>Syncing</span>
             </span>
-            <div className="flex flex-wrap items-center gap-3 sm:col-span-9">
-              {project.docUrl ? (
-                <a
-                  href={project.docUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 font-medium text-neutral-800 hover:underline dark:text-neutral-200"
-                >
-                  <FileText className="h-3.5 w-3.5 text-blue-600" />
-                  <span>{project.docTitle || 'Project Brief'}</span>
-                  <ExternalLink className="h-3 w-3 text-neutral-400" />
-                </a>
-              ) : (
-                <span className="text-neutral-400">No Doc linked</span>
-              )}
-              <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">
-                ·
-              </span>
-              {isSyncing ? (
-                <span className="inline-flex items-center gap-1 font-medium text-blue-600 dark:text-blue-400">
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                  <span>Syncing to Workspace...</span>
-                </span>
-              ) : hasPendingChanges ? (
-                <span className="font-medium text-amber-700 dark:text-amber-400">
-                  {autoSyncEnabled ? 'Auto-sync scheduled' : 'Unsynced local edits'}
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  <span>
-                    Synced{' '}
-                    {project.lastSyncedAt
-                      ? new Date(project.lastSyncedAt).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })
-                      : ''}
-                  </span>
-                </span>
-              )}
-            </div>
-          </div>
+          ) : hasPendingChanges ? (
+            <span className="font-medium text-amber-600 dark:text-amber-400">
+              {autoSyncEnabled ? 'Auto-syncing' : 'Unsynced'}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3 w-3" />
+              <span>Synced</span>
+            </span>
+          )}
         </div>
 
-        {/* View Switcher & Sync Action Bar */}
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-1 rounded-lg bg-neutral-100 p-1 dark:bg-neutral-800/80">
+        {/* View Switcher & Minimal Action Bar */}
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200/80 pb-3 dark:border-neutral-800">
+          <div className="flex flex-wrap items-center gap-1 rounded-lg bg-neutral-100/90 p-1 dark:bg-neutral-800/80">
             {(
               [
-                { id: 'page', label: 'Page & Brief', icon: <FileText className="h-3.5 w-3.5" /> },
-                { id: 'docs', label: 'Documents', icon: <Files className="h-3.5 w-3.5" /> },
+                { id: 'page', label: 'Brief', icon: <FileText className="h-3.5 w-3.5" /> },
+                { id: 'docs', label: 'Docs', icon: <Files className="h-3.5 w-3.5" /> },
                 { id: 'board', label: 'Board', icon: <Kanban className="h-3.5 w-3.5" /> },
                 { id: 'table', label: 'Table', icon: <Table2 className="h-3.5 w-3.5" /> },
                 { id: 'list', label: 'List', icon: <ListChecks className="h-3.5 w-3.5" /> },
-                { id: 'files', label: 'Drive Files', icon: <FolderOpen className="h-3.5 w-3.5" /> },
+                { id: 'files', label: 'Files', icon: <FolderOpen className="h-3.5 w-3.5" /> },
               ] as const
             ).map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => onTabChange(tab.id)}
-                className={`relative inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                className={`relative inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                   activeTab === tab.id
                     ? 'text-neutral-900 dark:text-neutral-100'
-                    : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
+                    : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
                 }`}
               >
                 {activeTab === tab.id && (
                   <motion.span
                     layoutId={`project-tab-pill-${project.id}`}
                     transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                    className="absolute inset-0 rounded-md bg-white shadow-xs dark:bg-[#191918]"
+                    className="absolute inset-0 rounded-md bg-white shadow-2xs dark:bg-[#191918]"
                   />
                 )}
                 <span className="relative z-10 inline-flex items-center gap-1.5">
@@ -491,7 +440,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <motion.button
               type="button"
               whileTap={{ scale: 0.96 }}
@@ -499,25 +448,11 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 onTabChange('docs');
                 setOpenCreatorSignal((n) => n + 1);
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
-              title="Create a new standalone Google Doc page in this project"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+              title="New document page"
             >
               <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-              <span>New Doc Page</span>
-            </motion.button>
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.96 }}
-              onClick={onToggleAutoSync}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                autoSyncEnabled
-                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-                  : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800'
-              }`}
-              title="Toggle automatic background sync to Google Sheets and Docs"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{autoSyncEnabled ? 'Auto-Sync: On' : 'Auto-Sync: Off'}</span>
+              <span>New Doc</span>
             </motion.button>
 
             <motion.button
@@ -525,37 +460,37 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
               whileTap={{ scale: 0.96 }}
               onClick={onPullFromWorkspace}
               disabled={isPulling || isSyncing}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
-              title="Pull latest changes from Google Sheets and Google Docs"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-600 transition-colors hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-300 dark:hover:bg-neutral-800"
+              title="Pull latest from Google Workspace"
+              aria-label="Pull latest"
             >
               {isPulling ? (
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <ArrowDownToLine className="h-3.5 w-3.5" />
               )}
-              <span>Pull</span>
             </motion.button>
 
-            {!autoSyncEnabled && (
+            {!autoSyncEnabled && hasPendingChanges && (
               <motion.button
                 type="button"
                 whileTap={{ scale: 0.96 }}
                 onClick={onPushToWorkspace}
-                disabled={!hasPendingChanges || isSyncing}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 disabled:opacity-35 dark:bg-blue-600 dark:hover:bg-blue-500 whitespace-nowrap shrink-0"
+                disabled={isSyncing}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 disabled:opacity-40 dark:bg-blue-600 dark:hover:bg-blue-500 whitespace-nowrap shrink-0"
               >
                 <ArrowUpFromLine className="h-3.5 w-3.5" />
-                <span>Sync Now</span>
+                <span>Sync</span>
               </motion.button>
             )}
 
-            {/* 3-Dot Project Options Menu */}
+            {/* 3-Dot Project Options Menu (includes Auto-Sync & Link File) */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setShowProjectMenu((v) => !v)}
                 className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-600 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-300 dark:hover:bg-neutral-800"
-                title="Project options (Add page, Move to folder, Remove, Delete)"
+                title="More options"
                 aria-label="Project options"
               >
                 <MoreHorizontal className="h-4 w-4" />
@@ -573,20 +508,59 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                       type="button"
                       onClick={() => {
                         setShowProjectMenu(false);
+                        onToggleAutoSync();
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <RefreshCw
+                          className={`h-3.5 w-3.5 ${
+                            autoSyncEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-400'
+                          }`}
+                        />
+                        <span>Auto-Sync</span>
+                      </span>
+                      <span
+                        className={`text-[11px] font-medium ${
+                          autoSyncEnabled
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-neutral-400'
+                        }`}
+                      >
+                        {autoSyncEnabled ? 'On' : 'Off'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowProjectMenu(false);
+                        onLinkExistingFile();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                    >
+                      <Link2 className="h-3.5 w-3.5 text-neutral-500" />
+                      <span>Link Sheet / Doc</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowProjectMenu(false);
                         onTabChange('docs');
                         setOpenCreatorSignal((n) => n + 1);
                       }}
                       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                     >
                       <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Add Standalone Page</span>
+                      <span>Add Page</span>
                     </button>
 
                     {folderGroups.length > 0 && onAssignProjectToGroup && (
                       <>
                         <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
                         <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
-                          Folder Group
+                          Folder
                         </div>
                         {project.groupId && (
                           <button
@@ -636,7 +610,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                         className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                       >
                         <EyeOff className="h-3.5 w-3.5 text-amber-600" />
-                        <span>Remove from Here (Keep in Drive)</span>
+                        <span>Remove from Folio</span>
                       </button>
                     )}
 
@@ -650,7 +624,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                         className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                        <span>Delete Permanently from Drive</span>
+                        <span>Delete Permanently</span>
                       </button>
                     )}
                   </motion.div>
@@ -728,14 +702,9 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
               {/* Inline Notion Database Embed inside Page */}
               <div className="border-t border-neutral-200 pt-8 dark:border-neutral-800">
                 <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <h2 className="font-display text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-                      Project Tasks Database
-                    </h2>
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                      Synced with Google Sheets · Click any task to inspect or drag across columns
-                    </p>
-                  </div>
+                  <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                    Tasks
+                  </h2>
                 </div>
                 <TaskDatabase
                   tasks={project.tasks}
@@ -873,6 +842,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 onLinkExistingFile={onLinkExistingFile}
                 onRenameFile={onRenameFile}
                 onTrashFile={onTrashFile}
+                onCreateProjectDoc={onCreateStandaloneDoc}
               />
             </motion.div>
           )}

@@ -16,9 +16,11 @@ import {
   Kanban,
   LayoutGrid,
   LogOut,
+  Maximize2,
   Moon,
   MoreHorizontal,
   PanelLeftClose,
+  PanelRight,
   Plus,
   RefreshCw,
   Search,
@@ -52,6 +54,7 @@ interface NotionSidebarProps {
   activeProjectId: string | null;
   activeGroupId: string | null;
   activeStandalonePageId: string | null;
+  sidePeekPageId?: string | null;
   activeTab: ProjectTabView;
   isOpen: boolean;
   darkMode: boolean;
@@ -62,11 +65,12 @@ interface NotionSidebarProps {
   onSelectProject: (projectId: string, tab?: ProjectTabView) => void;
   onSelectFolderGroup: (groupId: string) => void;
   onSelectStandalonePage: (pageId: string) => void;
+  onOpenStandalonePageInSidePeek?: (pageId: string) => void;
   onCreateProject: (defaultGroupId?: string | null) => void;
   onCreateFolderGroup: (name: string, icon: string) => void;
   onDeleteFolderGroup: (groupId: string) => void;
   onAssignProjectToGroup: (projectId: string, groupId: string | null) => void;
-  onCreateStandalonePage: () => void;
+  onCreateStandalonePage: (viewMode?: 'side' | 'fullscreen') => void;
   onAddStandalonePageToProject: (projectId: string) => void;
   onRemoveProjectFromWorkspace: (project: ProjectWorkspace) => void;
   onDeleteProjectPermanently: (project: ProjectWorkspace) => void;
@@ -87,6 +91,7 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
   activeProjectId,
   activeGroupId,
   activeStandalonePageId,
+  sidePeekPageId = null,
   activeTab,
   isOpen,
   darkMode,
@@ -97,6 +102,7 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
   onSelectProject,
   onSelectFolderGroup,
   onSelectStandalonePage,
+  onOpenStandalonePageInSidePeek,
   onCreateProject,
   onCreateFolderGroup,
   onDeleteFolderGroup,
@@ -476,11 +482,11 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
           <button
             type="button"
             onClick={onOpenCommandPalette}
-            className="flex w-full items-center justify-between rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs text-neutral-500 transition-colors hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-700/80 dark:bg-[#191918] dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:text-neutral-200"
+            className="flex w-full items-center justify-between rounded-lg border border-neutral-200/80 bg-white px-2.5 py-1.5 text-xs text-neutral-500 transition-colors hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-800 dark:bg-[#191918] dark:text-neutral-400 dark:hover:border-neutral-700 dark:hover:text-neutral-200"
           >
             <span className="flex items-center gap-2">
               <Search className="h-3.5 w-3.5" />
-              <span>Search pages & tasks</span>
+              <span>Search</span>
             </span>
             <kbd className="font-mono text-[10px] text-neutral-400">⌘K</kbd>
           </button>
@@ -505,7 +511,7 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
               />
             )}
             <LayoutGrid className="relative z-10 h-4 w-4 shrink-0" />
-            <span className="relative z-10 truncate">Home & Overview</span>
+            <span className="relative z-10 truncate">Home</span>
           </button>
           <button
             type="button"
@@ -524,7 +530,7 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
               />
             )}
             <Calendar className="relative z-10 h-4 w-4 shrink-0" />
-            <span className="relative z-10 truncate">Daily Tasks & Habits</span>
+            <span className="relative z-10 truncate">Daily</span>
           </button>
           <button
             type="button"
@@ -544,7 +550,7 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
             )}
             <span className="relative z-10 flex items-center gap-2.5 truncate">
               <RefreshCw className="h-4 w-4 shrink-0" />
-              <span className="truncate">Workspace Sync Hub</span>
+              <span className="truncate">Sync</span>
             </span>
             {projects.some(
               (p) =>
@@ -584,44 +590,44 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
             )}
             <HardDrive className="relative z-10 h-4 w-4 shrink-0" />
             <span className="relative z-10 truncate">
-              {isGuestMode ? 'Local Workspace Files' : 'Google Drive Files'}
+              {isGuestMode ? 'Local Files' : 'Drive'}
             </span>
           </button>
         </nav>
 
         {/* Scrollable Projects, Folders & Standalone Pages */}
-        <div className="mt-4 flex-1 overflow-y-auto px-2 pb-4 space-y-5">
+        <div className="mt-5 flex-1 overflow-y-auto px-2 pb-4 space-y-5">
           {/* Projects & Folder Groups Section */}
           <div>
             <div className="flex items-center justify-between px-2">
-              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                Projects & Folders
+              <span className="text-[11px] font-medium text-neutral-400 dark:text-neutral-500">
+                Projects
               </span>
               <div className="flex items-center gap-0.5">
                 <button
                   type="button"
                   onClick={() => setShowNewFolderInput((v) => !v)}
-                  className="rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                  title="New folder / project group"
-                  aria-label="New folder group"
+                  className="rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  title="New folder"
+                  aria-label="New folder"
                 >
                   <Folder className="h-3.5 w-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={onImportFromDrive}
-                  className="rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                  title="Import existing Drive folder, Sheet, or Doc"
-                  aria-label="Import from Google Drive"
+                  className="rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  title="Import from Drive"
+                  aria-label="Import from Drive"
                 >
                   <FolderPlus className="h-3.5 w-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={() => onCreateProject(null)}
-                  className="rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  className="rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                   title="New project"
-                  aria-label="Create new project"
+                  aria-label="New project"
                 >
                   <Plus className="h-3.5 w-3.5" />
                 </button>
@@ -779,8 +785,8 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
 
               {/* Ungrouped Projects */}
               {projects.length === 0 && folderGroups.length === 0 ? (
-                <div className="px-2.5 py-2 text-xs text-neutral-500 dark:text-neutral-400">
-                  No projects yet. Create one or import from Google Drive.
+                <div className="px-2.5 py-2 text-xs text-neutral-400">
+                  No projects yet
                 </div>
               ) : (
                 ungroupedProjects.map((project) => renderProjectItem(project, false))
@@ -791,15 +797,15 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
           {/* Standalone Pages Section */}
           <div>
             <div className="flex items-center justify-between px-2">
-              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                Standalone Pages
+              <span className="text-[11px] font-medium text-neutral-400 dark:text-neutral-500">
+                Pages
               </span>
               <button
                 type="button"
-                onClick={onCreateStandalonePage}
-                className="rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                title="Add new standalone Google Doc page"
-                aria-label="Add standalone page"
+                onClick={() => onCreateStandalonePage('side')}
+                className="rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                title="New page (opens in Side View)"
+                aria-label="New page"
               >
                 <Plus className="h-3.5 w-3.5" />
               </button>
@@ -809,17 +815,18 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
               {topLevelStandalonePages.length === 0 ? (
                 <button
                   type="button"
-                  onClick={onCreateStandalonePage}
-                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-neutral-500 hover:bg-neutral-200/50 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-800/60 dark:hover:text-neutral-200"
+                  onClick={() => onCreateStandalonePage('side')}
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-neutral-400 hover:bg-neutral-200/50 hover:text-neutral-800 dark:hover:bg-neutral-800/60 dark:hover:text-neutral-200"
                 >
-                  <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>+ Add standalone page</span>
+                  <FilePlus2 className="h-3.5 w-3.5" />
+                  <span>New page</span>
                 </button>
               ) : (
                 topLevelStandalonePages.map((pg) => {
                   const isSelected =
-                    activeArea === 'standalone-page' &&
-                    activeStandalonePageId === pg.id;
+                    (activeArea === 'standalone-page' &&
+                      activeStandalonePageId === pg.id) ||
+                    sidePeekPageId === pg.id;
                   const isMenuOpen = openMenuPageId === pg.id;
                   const childPages = standalonePages.filter(
                     (c) => c.parentDocId === pg.id
@@ -848,6 +855,21 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
                           )}
                         </button>
 
+                        {onOpenStandalonePageInSidePeek && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenStandalonePageInSidePeek(pg.id);
+                            }}
+                            className="rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-300/60 hover:text-neutral-800 group-hover:opacity-100 dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+                            title="Open in Side View"
+                            aria-label={`Open ${pg.title} in Side View`}
+                          >
+                            <PanelRight className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+
                         <button
                           type="button"
                           onClick={(e) => {
@@ -872,6 +894,31 @@ export const NotionSidebar: React.FC<NotionSidebarProps> = ({
                             exit={{ opacity: 0, y: 4, scale: 0.96 }}
                             className="absolute right-1 top-8 z-40 w-52 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl dark:border-neutral-700 dark:bg-[#242422]"
                           >
+                            {onOpenStandalonePageInSidePeek && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuPageId(null);
+                                  onOpenStandalonePageInSidePeek(pg.id);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                              >
+                                <PanelRight className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                                <span>Open in Side View</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuPageId(null);
+                                onSelectStandalonePage(pg.id);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                            >
+                              <Maximize2 className="h-3.5 w-3.5 text-neutral-500" />
+                              <span>Open Full Screen</span>
+                            </button>
+                            <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
                             <button
                               type="button"
                               onClick={() => {

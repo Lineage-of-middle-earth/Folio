@@ -3,7 +3,6 @@ import { User } from 'firebase/auth';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import {
   ArrowRight,
-  Calendar,
   CheckCircle2,
   ExternalLink,
   EyeOff,
@@ -19,12 +18,14 @@ import {
   Minimize2,
   MoreHorizontal,
   PanelLeftOpen,
+  PanelRight,
   Plus,
   RefreshCw,
   Trash2,
 } from 'lucide-react';
 import {
   clearAccessToken,
+  ensureAccessToken,
   getAccessToken,
   googleSignIn,
   initAuth,
@@ -101,7 +102,8 @@ export default function App() {
   const [user, setUser] = useState<User | SidebarUserProfile | null>(null);
   const [isGuestMode, setIsGuestMode] = useState<boolean>(false);
   const [token, setToken] = useState<string | null>(null);
-  const [needsAuth, setNeedsAuth] = useState(true);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [needsAuth, setNeedsAuth] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -144,6 +146,7 @@ export default function App() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [activeStandalonePageId, setActiveStandalonePageId] = useState<string | null>(null);
+  const [sidePeekPageId, setSidePeekPageId] = useState<string | null>(null);
   const [pendingProjectGroupId, setPendingProjectGroupId] = useState<string | null>(null);
   const [openOverviewMenuId, setOpenOverviewMenuId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProjectTabView>('page');
@@ -241,8 +244,9 @@ export default function App() {
     if (err instanceof AuthExpiredError) {
       clearAccessToken();
       setToken(null);
-      setNeedsAuth(true);
-      setAuthError('Your Google Workspace session expired. Please sign in again.');
+      setWorkspaceError(
+        'Google Drive token expired. Click "Reconnect Google Drive" in the top bar to continue syncing.'
+      );
       return;
     }
     const msg = err instanceof Error ? err.message : 'Workspace request failed.';
@@ -403,6 +407,24 @@ export default function App() {
     saveGuestStandalonePages(standalonePages);
   }, [isGuestMode, needsAuth, standalonePages]);
 
+  // Cache Google Workspace metadata (projects, standalonePages, rootFolder) locally per user UID
+  // so that page reloads keep the user signed in immediately without losing their workspace view
+  useEffect(() => {
+    if (isGuestMode || needsAuth || !user?.uid || isLoadingWorkspace) return;
+    try {
+      localStorage.setItem(
+        `folio_google_workspace_cache_v1_${user.uid}`,
+        JSON.stringify({
+          projects,
+          standalonePages,
+          rootFolder,
+        })
+      );
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [isGuestMode, needsAuth, user?.uid, isLoadingWorkspace, projects, standalonePages, rootFolder]);
+
   useEffect(() => {
     const unsub = initAuth(
       (authUser, accessToken) => {
@@ -411,7 +433,35 @@ export default function App() {
         setUser(authUser);
         setToken(accessToken);
         setNeedsAuth(false);
-        bootstrapWorkspace(accessToken, authUser.uid);
+        setIsAuthChecking(false);
+
+        // Immediately hydrate from local Google workspace cache so user stays logged in smoothly
+        try {
+          const cachedRaw = localStorage.getItem(
+            `folio_google_workspace_cache_v1_${authUser.uid}`
+          );
+          if (cachedRaw) {
+            const parsed = JSON.parse(cachedRaw);
+            if (Array.isArray(parsed.projects)) {
+              setProjects(parsed.projects);
+              if (parsed.projects.length > 0) {
+                setActiveProjectId((curr) => curr || parsed.projects[0].id);
+              }
+            }
+            if (Array.isArray(parsed.standalonePages)) {
+              setStandalonePages(parsed.standalonePages);
+            }
+            if (parsed.rootFolder) {
+              setRootFolder(parsed.rootFolder);
+            }
+          }
+        } catch {
+          // ignore cache parse error
+        }
+
+        if (accessToken) {
+          bootstrapWorkspace(accessToken, authUser.uid);
+        }
       },
       (authUser) => {
         if (isGuestModeStored()) {
@@ -419,12 +469,14 @@ export default function App() {
           setUser(GUEST_USER_PROFILE);
           setToken(null);
           setNeedsAuth(false);
+          setIsAuthChecking(false);
           bootstrapGuestWorkspace();
           return;
         }
         setUser(authUser);
         setToken(null);
         setNeedsAuth(true);
+        setIsAuthChecking(false);
       }
     );
     return () => unsub();
@@ -478,18 +530,48 @@ export default function App() {
     setActiveProjectId(null);
     setActiveGroupId(null);
     setActiveStandalonePageId(null);
+    setSidePeekPageId(null);
     setNeedsAuth(true);
   };
+
+  const handleReconnectGoogleDrive = useCallback(async (): Promise<string | null> => {
+    try {
+      const refreshedToken = await ensureAccessToken();
+      if (refreshedToken) {
+        setToken(refreshedToken);
+        setWorkspaceError(null);
+        if (user?.uid) {
+          await bootstrapWorkspace(refreshedToken, user.uid);
+        }
+        showToast('Reconnected to Google Drive');
+        return refreshedToken;
+      }
+      return null;
+    } catch (err) {
+      setWorkspaceError(
+        err instanceof Error ? err.message : 'Could not refresh Google Drive session.'
+      );
+      return null;
+    }
+  }, [bootstrapWorkspace, showToast, user?.uid]);
 
   const requireToken = useCallback((): string | null => {
     if (isGuestMode) return null;
     const activeToken = token || getAccessToken();
     if (!activeToken) {
-      setNeedsAuth(true);
+      // Keep user signed in and trigger token refresh in background instead of logging out
+      void handleReconnectGoogleDrive();
       return null;
     }
     return activeToken;
-  }, [token, isGuestMode]);
+  }, [token, isGuestMode, handleReconnectGoogleDrive]);
+
+  const requireTokenAsync = useCallback(async (): Promise<string | null> => {
+    if (isGuestMode) return null;
+    const activeToken = token || getAccessToken();
+    if (activeToken) return activeToken;
+    return handleReconnectGoogleDrive();
+  }, [token, isGuestMode, handleReconnectGoogleDrive]);
 
   const activeProject = useMemo(
     () => projects.find((p) => p.id === activeProjectId) || null,
@@ -506,6 +588,11 @@ export default function App() {
     [standalonePages, activeStandalonePageId]
   );
 
+  const sidePeekStandalonePage = useMemo(
+    () => standalonePages.find((pg) => pg.id === sidePeekPageId) || null,
+    [standalonePages, sidePeekPageId]
+  );
+
   const updateLocalProject = useCallback(
     (projectId: string, updater: (p: ProjectWorkspace) => ProjectWorkspace) => {
       setProjects((prev) => prev.map((p) => (p.id === projectId ? updater(p) : p)));
@@ -517,13 +604,15 @@ export default function App() {
   const handleCreateProject = async (
     title: string,
     icon: string,
-    coverIndex: number
+    coverIndex: number,
+    customCoverUrl?: string
   ) => {
     if (isGuestMode) {
       const created = createLocalWorkspaceProject(title, icon, coverIndex);
       const assignedGroupId = pendingProjectGroupId;
       const withGroup: ProjectWorkspace = {
         ...created,
+        coverUrl: customCoverUrl || created.coverUrl,
         groupId: assignedGroupId || null,
       };
       if (assignedGroupId) {
@@ -542,13 +631,17 @@ export default function App() {
       return;
     }
 
-    const accessToken = requireToken();
-    if (!accessToken || !rootFolder) {
-      throw new Error('Google Drive root folder is not ready.');
+    const accessToken = await requireTokenAsync();
+    if (!accessToken) {
+      throw new Error('Reconnect Google Drive to create a synced project.');
+    }
+    const activeRoot = rootFolder || (await findOrCreateRootFolder(accessToken));
+    if (!rootFolder) {
+      setRootFolder(activeRoot);
     }
     const created = await createFullWorkspaceProject(
       accessToken,
-      rootFolder.id,
+      activeRoot.id,
       title,
       icon,
       coverIndex
@@ -556,6 +649,7 @@ export default function App() {
     const assignedGroupId = pendingProjectGroupId;
     const withGroup: ProjectWorkspace = {
       ...created,
+      coverUrl: customCoverUrl || created.coverUrl,
       groupId: assignedGroupId || null,
     };
     if (assignedGroupId) {
@@ -761,12 +855,27 @@ export default function App() {
   const handleCreateWorkspaceStandalonePage = (
     parentDocId: string | null = null,
     initialTitle = 'Untitled Page',
-    replaceBlockId?: string
+    replaceBlockId?: string,
+    customBlocks?: DocBlock[],
+    viewMode: 'side' | 'fullscreen' = 'side'
   ) => {
     const cleanTitle = initialTitle.trim() || 'Untitled Page';
-    const starterBlocks = buildStandaloneDocStarterBlocks(cleanTitle, 'blank');
+    const starterBlocks =
+      customBlocks && customBlocks.length > 0
+        ? customBlocks
+        : buildStandaloneDocStarterBlocks(cleanTitle, 'blank');
 
-    if (isGuestMode) {
+    const openCreatedStandalonePage = (pageId: string) => {
+      if (viewMode === 'side') {
+        setSidePeekPageId(pageId);
+      } else {
+        setSidePeekPageId(null);
+        setActiveStandalonePageId(pageId);
+        setActiveArea('standalone-page');
+      }
+    };
+
+    if (isGuestMode || !token) {
       const created = createLocalStandalonePage({
         title: cleanTitle,
         icon: parentDocId ? '📑' : '📄',
@@ -804,10 +913,13 @@ export default function App() {
         setStandalonePages((prev) => [created, ...prev]);
       }
 
-      setActiveStandalonePageId(created.id);
-      setActiveArea('standalone-page');
-      logActivity(created.title, 'Docs', 'Created local standalone page');
-      showToast(`Created standalone page "${created.title}" locally`);
+      openCreatedStandalonePage(created.id);
+      logActivity(created.title, 'Docs', 'Created standalone page');
+      showToast(
+        viewMode === 'side'
+          ? `Opened "${created.title}" in Side View`
+          : `Created standalone page "${created.title}"`
+      );
       return;
     }
 
@@ -817,12 +929,16 @@ export default function App() {
     setPendingConfirmation({
       title: `Create Standalone Google Doc Page "${cleanTitle}"?`,
       description:
-        'This will create a new standalone Google Doc inside your Folio Workspace folder on Google Drive and open it as a full-screen Notion-style page.',
+        viewMode === 'side'
+          ? 'This will create a new standalone Google Doc inside your Folio Workspace folder on Google Drive and open it in the Notion-style Side View drawer (with one-click Full Screen expansion).'
+          : 'This will create a new standalone Google Doc inside your Folio Workspace folder on Google Drive and open it as a full-screen Notion-style page.',
       details: [
         `Page Title: "${cleanTitle}"`,
+        `Open Mode: ${viewMode === 'side' ? 'Side View (expandable to Full Screen)' : 'Full Screen'}`,
         `Location: ${rootFolder?.name || 'Folio Workspace'} (Google Drive)`,
       ],
-      confirmLabel: 'Create Standalone Page',
+      confirmLabel:
+        viewMode === 'side' ? 'Create & Open in Side View' : 'Create in Full Screen',
       onConfirm: async () => {
         const freshToken = requireToken();
         if (!freshToken) return;
@@ -865,14 +981,17 @@ export default function App() {
           setStandalonePages((prev) => [created, ...prev]);
         }
 
-        setActiveStandalonePageId(created.id);
-        setActiveArea('standalone-page');
+        openCreatedStandalonePage(created.id);
         logActivity(
           created.title,
           'Docs',
           'Created standalone Google Doc page'
         );
-        showToast(`Created standalone page "${created.title}"`);
+        showToast(
+          viewMode === 'side'
+            ? `Created "${created.title}" in Side View`
+            : `Created standalone page "${created.title}"`
+        );
       },
     });
   };
@@ -2976,6 +3095,19 @@ export default function App() {
     showToast('Downloaded local workspace backup (.json)');
   }, [projects, standalonePages, folderGroups, showToast]);
 
+  if (isAuthChecking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white text-[#191918] dark:bg-[#191918] dark:text-[#EDEDEC]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="font-display text-lg font-bold tracking-tight">Folio</div>
+          <div className="h-1 w-24 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+            <div className="h-full w-1/2 animate-pulse rounded-full bg-neutral-400 dark:bg-neutral-500" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (needsAuth || !user) {
     return (
       <AuthScreen
@@ -3018,6 +3150,7 @@ export default function App() {
         activeProjectId={activeProjectId}
         activeGroupId={activeGroupId}
         activeStandalonePageId={activeStandalonePageId}
+        sidePeekPageId={sidePeekPageId}
         activeTab={activeTab}
         isOpen={sidebarOpen}
         darkMode={darkMode}
@@ -3036,8 +3169,12 @@ export default function App() {
           setActiveArea('folder-group');
         }}
         onSelectStandalonePage={(pageId) => {
+          setSidePeekPageId(null);
           setActiveStandalonePageId(pageId);
           setActiveArea('standalone-page');
+        }}
+        onOpenStandalonePageInSidePeek={(pageId) => {
+          setSidePeekPageId(pageId);
         }}
         onCreateProject={(defaultGroupId = null) => {
           setPendingProjectGroupId(defaultGroupId);
@@ -3046,8 +3183,14 @@ export default function App() {
         onCreateFolderGroup={handleCreateFolderGroup}
         onDeleteFolderGroup={handleDeleteFolderGroup}
         onAssignProjectToGroup={handleAssignProjectToGroup}
-        onCreateStandalonePage={() =>
-          handleCreateWorkspaceStandalonePage(null, 'Untitled Page')
+        onCreateStandalonePage={(viewMode = 'side') =>
+          handleCreateWorkspaceStandalonePage(
+            null,
+            'Untitled Page',
+            undefined,
+            undefined,
+            viewMode
+          )
         }
         onAddStandalonePageToProject={handleAddStandalonePageToProject}
         onRemoveProjectFromWorkspace={handleRemoveProjectFromWorkspace}
@@ -3100,19 +3243,18 @@ export default function App() {
             </span>
             {activeArea === 'overview' && (
               <span className="truncate text-neutral-700 dark:text-neutral-300">
-                Home & Overview
+                Home
               </span>
             )}
             {activeArea === 'daily-planner' && (
               <span className="truncate text-neutral-700 dark:text-neutral-300">
-                Daily Tasks, Habits & Notes
+                Daily
               </span>
             )}
             {activeArea === 'folder-group' && activeFolderGroup && (
               <span className="flex items-center gap-1.5 truncate font-medium text-neutral-900 dark:text-neutral-100">
                 <span>{activeFolderGroup.icon}</span>
                 <span className="truncate">{activeFolderGroup.name}</span>
-                <span className="text-neutral-400 font-normal">· Gallery</span>
               </span>
             )}
             {activeArea === 'standalone-page' && activeStandalonePage && (
@@ -3123,12 +3265,12 @@ export default function App() {
             )}
             {activeArea === 'sync-hub' && (
               <span className="truncate text-neutral-700 dark:text-neutral-300">
-                Workspace Sync Hub
+                Sync
               </span>
             )}
             {activeArea === 'drive-browser' && (
               <span className="truncate text-neutral-700 dark:text-neutral-300">
-                Google Drive Files
+                {isGuestMode ? 'Local Files' : 'Drive'}
               </span>
             )}
             {activeArea === 'project' && activeProject && (
@@ -3170,9 +3312,9 @@ export default function App() {
                 </span>
                 <span className="capitalize text-neutral-500 dark:text-neutral-400 whitespace-nowrap shrink-0">
                   {activeTab === 'page'
-                    ? 'Page & Brief'
+                    ? 'Brief'
                     : activeTab === 'docs'
-                    ? 'Documents'
+                    ? 'Docs'
                     : activeTab}
                 </span>
               </>
@@ -3180,30 +3322,32 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {!isGuestMode && !token && (
+              <button
+                type="button"
+                onClick={handleReconnectGoogleDrive}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-300 whitespace-nowrap shrink-0"
+                title="Refresh Google Drive connection"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>Reconnect</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={handleToggleFullWidth}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+              className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors shrink-0 ${
                 fullWidthCanvas
                   ? 'border-neutral-900 bg-neutral-900 text-white dark:border-neutral-100 dark:bg-neutral-100 dark:text-neutral-900'
-                  : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800'
+                  : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-300 dark:hover:bg-neutral-800'
               }`}
-              title={
-                fullWidthCanvas
-                  ? 'Switch to standard page width'
-                  : 'Expand canvas width from edge to edge'
-              }
+              title={fullWidthCanvas ? 'Standard width' : 'Full width'}
+              aria-label={fullWidthCanvas ? 'Standard width' : 'Full width'}
             >
               {fullWidthCanvas ? (
-                <>
-                  <Minimize2 className="h-3.5 w-3.5" />
-                  <span>Standard Width</span>
-                </>
+                <Minimize2 className="h-3.5 w-3.5" />
               ) : (
-                <>
-                  <Maximize2 className="h-3.5 w-3.5" />
-                  <span>Full Width</span>
-                </>
+                <Maximize2 className="h-3.5 w-3.5" />
               )}
             </button>
 
@@ -3211,12 +3355,12 @@ export default function App() {
               syncingIds[activeProject.id] ? (
                 <span className="inline-flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 whitespace-nowrap shrink-0">
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                  <span>Syncing...</span>
+                  <span>Syncing</span>
                 </span>
               ) : hasProjectDirty(activeProject) ? (
                 autoSyncEnabled ? (
                   <span className="text-xs text-amber-600 dark:text-amber-400 whitespace-nowrap shrink-0">
-                    Auto-syncing...
+                    Auto-syncing
                   </span>
                 ) : (
                   <button
@@ -3225,13 +3369,13 @@ export default function App() {
                     className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500 whitespace-nowrap shrink-0"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
-                    <span>Sync Changes</span>
+                    <span>Sync</span>
                   </button>
                 )
               ) : (
                 <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400 whitespace-nowrap shrink-0">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  <span>{autoSyncEnabled ? 'Auto-synced' : 'Synced'}</span>
+                  <span>Synced</span>
                 </span>
               )
             ) : (
@@ -3312,129 +3456,128 @@ export default function App() {
                   : 'mx-auto max-w-[1100px] space-y-8 px-6 py-8 lg:px-10 transition-all duration-200'
               }
             >
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                    Connected to {user.email}
-                  </p>
-                  <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
-                    Workspace Overview
-                  </h1>
-                </div>
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <h1 className="font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50 sm:text-3xl">
+                  Overview
+                </h1>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() =>
                       handleCreateWorkspaceStandalonePage(null, 'Untitled Page')
                     }
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
                   >
                     <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>+ Standalone Page</span>
+                    <span>New Page</span>
                   </button>
                   <button
                     type="button"
                     onClick={() =>
                       handleCreateFolderGroup(
-                        `Project Group ${folderGroups.length + 1}`,
+                        `Folder ${folderGroups.length + 1}`,
                         '📁'
                       )
                     }
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
                   >
                     <Folder className="h-3.5 w-3.5 text-amber-600" />
-                    <span>+ New Folder</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveArea('daily-planner')}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
-                  >
-                    <Calendar className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Daily Tasks & Habits</span>
+                    <span>New Folder</span>
                   </button>
                   <button
                     type="button"
                     onClick={() =>
                       setLinkModalState({ open: true, mode: 'import-project' })
                     }
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
                   >
                     <FolderPlus className="h-3.5 w-3.5" />
-                    <span>Import from Drive</span>
+                    <span>Import</span>
                   </button>
                   {rootFolder && (
                     <a
                       href={rootFolder.webViewLink}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-600 transition-colors hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-300 dark:hover:bg-neutral-800"
+                      title="Open Folio folder in Google Drive"
+                      aria-label="Open Folio folder in Google Drive"
                     >
-                      <span>Open Root Folder</span>
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   )}
                 </div>
               </div>
 
-              {/* 4-Column Metric Strip */}
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                <div className="rounded-xl border border-neutral-200 bg-[#F8F8F7] p-4 dark:border-neutral-800 dark:bg-[#20201E]">
-                  <div className="text-xs text-neutral-500 dark:text-neutral-400">
-                    Active Projects
-                  </div>
-                  <div className="mt-1.5 font-display text-2xl font-semibold tabular-nums text-neutral-900 dark:text-neutral-50">
+              {/* Quiet Inline Hairline Metric Strip */}
+              <div className="flex flex-wrap items-center gap-x-8 gap-y-3 border-y border-neutral-200/80 py-4 dark:border-neutral-800">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display text-2xl font-semibold tabular-nums text-neutral-900 dark:text-neutral-50">
                     {projects.length}
-                  </div>
+                  </span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Projects
+                  </span>
                 </div>
-                <div className="rounded-xl border border-neutral-200 bg-[#F8F8F7] p-4 dark:border-neutral-800 dark:bg-[#20201E]">
-                  <div className="text-xs text-neutral-500 dark:text-neutral-400">
-                    Total Tasks
-                  </div>
-                  <div className="mt-1.5 font-display text-2xl font-semibold tabular-nums text-neutral-900 dark:text-neutral-50">
+                <span aria-hidden="true" className="hidden h-4 w-px bg-neutral-200 dark:bg-neutral-800 sm:block" />
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display text-2xl font-semibold tabular-nums text-neutral-900 dark:text-neutral-50">
                     {totalTasks}
-                  </div>
+                  </span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Tasks
+                  </span>
                 </div>
-                <div className="rounded-xl border border-neutral-200 bg-[#F8F8F7] p-4 dark:border-neutral-800 dark:bg-[#20201E]">
-                  <div className="text-xs text-neutral-500 dark:text-neutral-400">
-                    Completed Tasks
-                  </div>
-                  <div className="mt-1.5 font-display text-2xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
+                <span aria-hidden="true" className="hidden h-4 w-px bg-neutral-200 dark:bg-neutral-800 sm:block" />
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display text-2xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
                     {completedTasks}
-                  </div>
+                  </span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Done
+                  </span>
                 </div>
-                <div className="rounded-xl border border-neutral-200 bg-[#F8F8F7] p-4 dark:border-neutral-800 dark:bg-[#20201E]">
-                  <div className="text-xs text-neutral-500 dark:text-neutral-400">
-                    Unsynced Projects
-                  </div>
-                  <div className="mt-1.5 font-display text-2xl font-semibold tabular-nums text-neutral-900 dark:text-neutral-50">
-                    {unsyncedProjects}
-                  </div>
-                </div>
+                {unsyncedProjects > 0 && (
+                  <>
+                    <span aria-hidden="true" className="hidden h-4 w-px bg-neutral-200 dark:bg-neutral-800 sm:block" />
+                    <button
+                      type="button"
+                      onClick={() => setActiveArea('sync-hub')}
+                      className="flex items-baseline gap-2 text-left hover:opacity-80"
+                    >
+                      <span className="font-display text-2xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+                        {unsyncedProjects}
+                      </span>
+                      <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                        Unsynced
+                      </span>
+                    </button>
+                  </>
+                )}
               </div>
 
               {/* Folder Groups Section on Overview */}
               {folderGroups.length > 0 && (
                 <div>
                   <div className="mb-3.5 flex items-center justify-between">
-                    <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                      Project Folders & Groups
+                    <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+                      Folders
                     </h2>
                     <button
                       type="button"
                       onClick={() =>
                         handleCreateFolderGroup(
-                          `Project Group ${folderGroups.length + 1}`,
+                          `Folder ${folderGroups.length + 1}`,
                           '📁'
                         )
                       }
-                      className="inline-flex items-center gap-1 text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
                     >
                       <Plus className="h-3.5 w-3.5" />
-                      <span>New Folder</span>
+                      <span>New</span>
                     </button>
                   </div>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
                     {folderGroups.map((grp) => {
                       const grpProjects = projects.filter(
                         (p) => p.groupId === grp.id
@@ -3456,49 +3599,26 @@ export default function App() {
                             setActiveGroupId(grp.id);
                             setActiveArea('folder-group');
                           }}
-                          className="group flex flex-col justify-between rounded-xl border border-neutral-200 bg-[#F8F8F7] p-4 text-left transition-all hover:border-neutral-300 hover:bg-white hover:shadow-xs dark:border-neutral-800 dark:bg-[#20201E] dark:hover:border-neutral-700"
+                          className="group flex flex-col justify-between rounded-xl border border-neutral-200 bg-white p-4 text-left transition-all hover:border-neutral-300 dark:border-neutral-800 dark:bg-[#20201E] dark:hover:border-neutral-700"
                         >
-                          <div>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="flex items-center gap-2.5">
-                                <span className="text-xl">{grp.icon}</span>
-                                <span className="font-display text-base font-semibold text-neutral-900 group-hover:underline dark:text-neutral-100">
-                                  {grp.name}
-                                </span>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="text-lg">{grp.icon}</span>
+                              <span className="truncate font-display text-sm font-semibold text-neutral-900 group-hover:underline dark:text-neutral-100">
+                                {grp.name}
                               </span>
-                              <span className="rounded-md bg-white px-2 py-0.5 font-mono text-xs tabular-nums text-neutral-600 dark:bg-[#191918] dark:text-neutral-300">
-                                {grpProjects.length} project{grpProjects.length === 1 ? '' : 's'}
-                              </span>
-                            </div>
-                            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                              {grpProjects.length === 0 ? (
-                                <span className="text-xs text-neutral-400">
-                                  Empty folder · Click to open gallery
-                                </span>
-                              ) : (
-                                grpProjects.slice(0, 3).map((gp) => (
-                                  <span
-                                    key={gp.id}
-                                    className="inline-flex items-center gap-1 rounded-md border border-neutral-200/80 bg-white px-2 py-0.5 text-[11px] text-neutral-700 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-300"
-                                  >
-                                    <span>{gp.icon}</span>
-                                    <span className="max-w-[110px] truncate">{gp.title}</span>
-                                  </span>
-                                ))
-                              )}
-                              {grpProjects.length > 3 && (
-                                <span className="text-[11px] text-neutral-400">
-                                  +{grpProjects.length - 3} more
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="mt-3 flex items-center justify-between border-t border-neutral-200/70 pt-2.5 text-xs text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-                            <span className="tabular-nums">
-                              {grpDone}/{grpTasks} tasks done
                             </span>
-                            <span className="font-medium text-neutral-700 group-hover:text-neutral-900 dark:text-neutral-300">
-                              Open Gallery →
+                            <span className="font-mono text-xs tabular-nums text-neutral-400 shrink-0">
+                              {grpProjects.length}
+                            </span>
+                          </div>
+                          <div className="mt-2.5 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+                            <span className="tabular-nums">
+                              {grpProjects.length} project{grpProjects.length === 1 ? '' : 's'}
+                            </span>
+                            <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+                            <span className="tabular-nums">
+                              {grpDone}/{grpTasks} tasks
                             </span>
                           </div>
                         </button>
@@ -3510,48 +3630,48 @@ export default function App() {
 
               {/* Projects Grid or Empty State */}
               {projects.length === 0 ? (
-                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-[#F8F8F7] px-6 py-16 text-center dark:border-neutral-800 dark:bg-[#20201E]">
-                  <FolderOpen className="h-9 w-9 text-neutral-400" />
-                  <h2 className="mt-3 font-display text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-                    Your Folio Workspace is ready
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-[#F8F8F7] px-6 py-14 text-center dark:border-neutral-800 dark:bg-[#20201E]">
+                  <FolderOpen className="h-8 w-8 text-neutral-400" />
+                  <h2 className="mt-3 font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                    No projects yet
                   </h2>
-                  <p className="mt-1 max-w-md text-sm text-neutral-600 dark:text-neutral-400">
-                    Create your first project to automatically provision a Google Drive folder, a Tasks Google Sheet, and a Brief Google Doc—or import an existing Drive folder.
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    Start a new project or import an existing Drive folder.
                   </p>
-                  <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                  <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
                     <button
                       type="button"
                       onClick={() => setNewProjectOpen(true)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500"
                     >
                       <Plus className="h-3.5 w-3.5" />
-                      <span>Create First Project</span>
+                      <span>New Project</span>
                     </button>
                     <button
                       type="button"
                       onClick={() =>
                         setLinkModalState({ open: true, mode: 'import-project' })
                       }
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-4 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-200"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-200"
                     >
                       <FolderPlus className="h-3.5 w-3.5" />
-                      <span>Import from Google Drive</span>
+                      <span>Import</span>
                     </button>
                   </div>
                 </div>
               ) : (
                 <div>
-                  <div className="mb-4 flex items-center justify-between">
-                    <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                  <div className="mb-3.5 flex items-center justify-between">
+                    <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
                       Projects
                     </h2>
                     <button
                       type="button"
                       onClick={() => setActiveArea('sync-hub')}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
                     >
-                      <span>Open Sync Hub</span>
-                      <ArrowRight className="h-3.5 w-3.5" />
+                      <span>Sync</span>
+                      <ArrowRight className="h-3 w-3" />
                     </button>
                   </div>
 
@@ -3802,34 +3922,46 @@ export default function App() {
               {/* Standalone Pages Section on Overview */}
               <div>
                 <div className="mb-3.5 flex items-center justify-between">
-                  <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                    Standalone Pages ({standalonePages.length})
+                  <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+                    Pages
                   </h2>
                   <button
                     type="button"
                     onClick={() =>
-                      handleCreateWorkspaceStandalonePage(null, 'Untitled Page')
+                      handleCreateWorkspaceStandalonePage(
+                        null,
+                        'Untitled Page',
+                        undefined,
+                        undefined,
+                        'side'
+                      )
                     }
-                    className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    <span>Add Standalone Page</span>
+                    <span>New Page</span>
                   </button>
                 </div>
                 {standalonePages.length === 0 ? (
-                  <div className="flex items-center justify-between rounded-xl border border-dashed border-neutral-300 bg-[#F8F8F7] px-5 py-4 dark:border-neutral-800 dark:bg-[#20201E]">
-                    <div className="text-xs text-neutral-500 dark:text-neutral-400">
-                      Create standalone Notion-style pages synced directly with Google Docs in your Folio Workspace folder.
-                    </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-neutral-300 bg-[#F8F8F7] px-5 py-4 dark:border-neutral-800 dark:bg-[#20201E]">
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                      No standalone pages yet.
+                    </span>
                     <button
                       type="button"
                       onClick={() =>
-                        handleCreateWorkspaceStandalonePage(null, 'Untitled Page')
+                        handleCreateWorkspaceStandalonePage(
+                          null,
+                          'Untitled Page',
+                          undefined,
+                          undefined,
+                          'side'
+                        )
                       }
                       className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-800 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-200 shrink-0"
                     >
-                      <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                      <span>Create Standalone Page</span>
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>New Page</span>
                     </button>
                   </div>
                 ) : (
@@ -3841,11 +3973,9 @@ export default function App() {
                       >
                         <button
                           type="button"
-                          onClick={() => {
-                            setActiveStandalonePageId(pg.id);
-                            setActiveArea('standalone-page');
-                          }}
+                          onClick={() => setSidePeekPageId(pg.id)}
                           className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                          title="Open in Side View"
                         >
                           <span className="text-lg">{pg.icon}</span>
                           <div className="min-w-0">
@@ -3853,11 +3983,31 @@ export default function App() {
                               {pg.title}
                             </div>
                             <div className="text-[11px] text-neutral-400">
-                              {pg.blocks.length} block{pg.blocks.length === 1 ? '' : 's'} · Google Doc
+                              {pg.blocks.length} block{pg.blocks.length === 1 ? '' : 's'}
                             </div>
                           </div>
                         </button>
                         <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setSidePeekPageId(pg.id)}
+                            className="rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-blue-600 dark:hover:bg-neutral-800 dark:hover:text-blue-400"
+                            title="Open in Side View"
+                          >
+                            <PanelRight className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSidePeekPageId(null);
+                              setActiveStandalonePageId(pg.id);
+                              setActiveArea('standalone-page');
+                            }}
+                            className="rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                            title="Open Full Screen"
+                          >
+                            <Maximize2 className="h-3.5 w-3.5" />
+                          </button>
                           <button
                             type="button"
                             onClick={() =>
@@ -3989,6 +4139,10 @@ export default function App() {
                 onDeletePermanently={() =>
                   handleDeleteStandalonePagePermanently(activeStandalonePage)
                 }
+                onOpenInSidePeek={() => {
+                  setSidePeekPageId(activeStandalonePage.id);
+                  setActiveArea('overview');
+                }}
               />
             </motion.div>
           ) : activeArea === 'daily-planner' ? (
@@ -4041,11 +4195,31 @@ export default function App() {
                 token={token}
                 isGuestMode={isGuestMode}
                 localFiles={allLocalFiles}
+                projects={projects}
                 rootFolderUrl={rootFolder?.webViewLink || null}
                 onImportAsProject={(file) =>
                   handleImportOrLinkFile(file, 'import-project')
                 }
+                onCreateOrganizedDocument={({
+                  title,
+                  destination,
+                  projectId,
+                  blocks,
+                }) => {
+                  if (destination === 'project') {
+                    const targetProject =
+                      projects.find((p) => p.id === projectId) || projects[0];
+                    if (targetProject) {
+                      setActiveProjectId(targetProject.id);
+                      setActiveArea('project');
+                      handleCreateStandaloneDoc(targetProject, title, blocks);
+                      return;
+                    }
+                  }
+                  handleCreateWorkspaceStandalonePage(null, title, undefined, blocks);
+                }}
                 onExportLocalBackup={handleExportLocalBackup}
+                onReconnectDrive={handleReconnectGoogleDrive}
               />
             </motion.div>
           ) : activeProject ? (
@@ -4246,6 +4420,96 @@ export default function App() {
         confirmation={pendingConfirmation}
         onClose={() => setPendingConfirmation(null)}
       />
+
+      {/* Notion-Style Side View (Side Peek Drawer) for Standalone Pages */}
+      <AnimatePresence>
+        {sidePeekStandalonePage && (
+          <div className="fixed inset-0 z-40 flex justify-end bg-black/25 backdrop-blur-[1px]">
+            <div
+              className="flex-1"
+              onClick={() => setSidePeekPageId(null)}
+            />
+            <motion.div
+              key={`side-peek-${sidePeekStandalonePage.id}`}
+              initial={{ opacity: 0, x: 48 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 48 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="relative flex h-full w-full max-w-[700px] flex-col overflow-y-auto border-l border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-[#191918]"
+            >
+              <StandalonePageView
+                page={sidePeekStandalonePage}
+                allPages={standalonePages}
+                isPulling={Boolean(pullingStandaloneIds[sidePeekStandalonePage.id])}
+                isSyncing={Boolean(syncingStandaloneIds[sidePeekStandalonePage.id])}
+                autoSyncEnabled={autoSyncEnabled}
+                isSidePeek={true}
+                onExpandToFullScreen={() => {
+                  const targetId = sidePeekStandalonePage.id;
+                  setSidePeekPageId(null);
+                  setActiveStandalonePageId(targetId);
+                  setActiveArea('standalone-page');
+                }}
+                onCloseSidePeek={() => setSidePeekPageId(null)}
+                onTitleChange={(title) =>
+                  setStandalonePages((prev) =>
+                    prev.map((pg) =>
+                      pg.id === sidePeekStandalonePage.id
+                        ? { ...pg, title, dirty: true }
+                        : pg
+                    )
+                  )
+                }
+                onIconChange={(icon) =>
+                  setStandalonePages((prev) =>
+                    prev.map((pg) =>
+                      pg.id === sidePeekStandalonePage.id ? { ...pg, icon } : pg
+                    )
+                  )
+                }
+                onCoverChange={(coverUrl) =>
+                  setStandalonePages((prev) =>
+                    prev.map((pg) =>
+                      pg.id === sidePeekStandalonePage.id ? { ...pg, coverUrl } : pg
+                    )
+                  )
+                }
+                onBlocksChange={(blocks) =>
+                  setStandalonePages((prev) =>
+                    prev.map((pg) =>
+                      pg.id === sidePeekStandalonePage.id
+                        ? { ...pg, blocks, dirty: true }
+                        : pg
+                    )
+                  )
+                }
+                onPullPage={() => handlePullStandalonePage(sidePeekStandalonePage)}
+                onPushPage={() => handlePushStandalonePage(sidePeekStandalonePage)}
+                onCreateSubPage={(title, replaceBlockId) =>
+                  handleCreateWorkspaceStandalonePage(
+                    sidePeekStandalonePage.id,
+                    title,
+                    replaceBlockId,
+                    undefined,
+                    'side'
+                  )
+                }
+                onOpenPage={(pageId) => {
+                  setSidePeekPageId(pageId);
+                }}
+                onRemoveFromWorkspace={() => {
+                  setSidePeekPageId(null);
+                  handleRemoveStandalonePageFromWorkspace(sidePeekStandalonePage);
+                }}
+                onDeletePermanently={() => {
+                  setSidePeekPageId(null);
+                  handleDeleteStandalonePagePermanently(sidePeekStandalonePage);
+                }}
+              />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {toastMessage && (

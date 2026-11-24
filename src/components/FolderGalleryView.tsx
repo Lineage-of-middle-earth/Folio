@@ -262,10 +262,13 @@ export const FolderGalleryView: React.FC<FolderGalleryViewProps> = ({
       ) : (
         <>
           <div>
-            <div className="mb-3.5 flex items-center justify-between">
-              <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                Folder Gallery ({projectsInGroup.length})
+            <div className="mb-4 flex items-baseline gap-2">
+              <h2 className="font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                Projects
               </h2>
+              <span className="font-mono text-xs tabular-nums text-neutral-400">
+                {projectsInGroup.length}
+              </span>
             </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
@@ -283,12 +286,12 @@ export const FolderGalleryView: React.FC<FolderGalleryViewProps> = ({
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.18, delay: Math.min(idx * 0.04, 0.2) }}
-                    className="group relative flex flex-col overflow-visible rounded-xl border border-neutral-200 bg-white transition-all hover:border-neutral-300 hover:shadow-sm dark:border-neutral-800 dark:bg-[#20201E] dark:hover:border-neutral-700"
+                    className="group relative flex flex-col overflow-visible rounded-xl border border-neutral-200/80 bg-white transition-all hover:border-neutral-300 dark:border-neutral-800 dark:bg-[#20201E] dark:hover:border-neutral-700"
                   >
                     {/* Cover Banner */}
                     <div
                       onClick={() => onOpenProject(p.id, 'page')}
-                      className="h-32 w-full cursor-pointer overflow-hidden rounded-t-xl border-b border-neutral-200 dark:border-neutral-800"
+                      className="h-28 w-full cursor-pointer overflow-hidden rounded-t-xl border-b border-neutral-200/70 dark:border-neutral-800"
                       style={{ background: fallback }}
                     >
                       {p.coverUrl && (
@@ -309,7 +312,9 @@ export const FolderGalleryView: React.FC<FolderGalleryViewProps> = ({
                           e.stopPropagation();
                           setOpenMenuProjectId(isMenuOpen ? null : p.id);
                         }}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg border border-neutral-200/80 bg-white/90 text-neutral-700 shadow-xs backdrop-blur-xs transition-colors hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-200"
+                        className={`flex h-7 w-7 items-center justify-center rounded-lg bg-white/90 text-neutral-700 shadow-xs backdrop-blur-xs transition-opacity hover:bg-white dark:bg-neutral-900/90 dark:text-neutral-200 ${
+                          isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        }`}
                         title="Project options"
                       >
                         <MoreHorizontal className="h-4 w-4" />
@@ -321,7 +326,7 @@ export const FolderGalleryView: React.FC<FolderGalleryViewProps> = ({
                             initial={{ opacity: 0, y: 4, scale: 0.96 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 4, scale: 0.96 }}
-                            className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl dark:border-neutral-700 dark:bg-[#242422]"
+                            className="absolute right-0 top-full z-30 mt-1.5 w-52 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl dark:border-neutral-700 dark:bg-[#242422]"
                           >
                             <button
                               type="button"
@@ -332,7 +337,7 @@ export const FolderGalleryView: React.FC<FolderGalleryViewProps> = ({
                               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                             >
                               <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                              <span>Add Standalone Page</span>
+                              <span>New Page</span>
                             </button>
 
                             <button
@@ -377,7 +382,7 @@ export const FolderGalleryView: React.FC<FolderGalleryViewProps> = ({
                               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                             >
                               <EyeOff className="h-3.5 w-3.5 text-amber-600" />
-                              <span>Remove from Here (Keep in Drive)</span>
+                              <span>Hide from Workspace</span>
                             </button>
 
                             <button
@@ -389,7 +394,7 @@ export const FolderGalleryView: React.FC<FolderGalleryViewProps> = ({
                               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
-                              <span>Delete Permanently from Drive</span>
+                              <span>Delete from Drive</span>
                             </button>
                           </motion.div>
                         )}
@@ -397,86 +402,58 @@ export const FolderGalleryView: React.FC<FolderGalleryViewProps> = ({
                     </div>
 
                     {/* Card Body */}
-                    <div className="flex flex-1 flex-col justify-between p-4">
+                    <div
+                      onClick={() => onOpenProject(p.id, 'page')}
+                      className="flex flex-1 cursor-pointer flex-col justify-between p-4"
+                    >
                       <div>
-                        <button
-                          type="button"
-                          onClick={() => onOpenProject(p.id, 'page')}
-                          className="flex items-center gap-2 text-left"
-                        >
-                          <span className="text-lg">{p.icon}</span>
-                          <h3 className="font-display text-base font-semibold text-neutral-900 hover:underline dark:text-neutral-100">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{p.icon}</span>
+                          <h3 className="truncate font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                             {p.title}
                           </h3>
-                        </button>
+                        </div>
 
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-                          <span className="tabular-nums">
-                            {done}/{p.tasks.length} tasks done
-                          </span>
-                          <span aria-hidden="true">·</span>
-                          <span className="tabular-nums">{docCount} docs</span>
-                          <span aria-hidden="true">·</span>
-                          <span className="tabular-nums">{p.driveFiles.length} files</span>
-                          {hasProjectDirty(p) && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span className="font-medium text-amber-600 dark:text-amber-400">
-                                Unsynced
-                              </span>
-                            </>
+                        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+                          <div className="flex items-center gap-1.5 tabular-nums">
+                            <span>
+                              {done}/{p.tasks.length} tasks
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span>
+                              {docCount} {docCount === 1 ? 'doc' : 'docs'}
+                            </span>
+                            {hasProjectDirty(p) && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="font-medium text-amber-600 dark:text-amber-400">
+                                  Unsynced
+                                </span>
+                              </>
+                            )}
+                          </div>
+
+                          {p.driveFolderUrl && (
+                            <a
+                              href={p.driveFolderUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 text-neutral-400 transition-colors hover:text-neutral-900 dark:hover:text-neutral-100"
+                              title="Open in Google Drive"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
                           )}
                         </div>
 
-                        {/* Task Progress Bar */}
-                        <div className="mt-3">
-                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+                        {p.tasks.length > 0 && (
+                          <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
                             <div
                               className="h-full rounded-full bg-emerald-600 transition-all duration-300 dark:bg-emerald-500"
                               style={{ width: `${progressPct}%` }}
                             />
                           </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex items-center justify-between border-t border-neutral-100 pt-3 text-xs dark:border-neutral-800">
-                        <div className="flex items-center gap-2.5">
-                          <button
-                            type="button"
-                            onClick={() => onOpenProject(p.id, 'page')}
-                            className="inline-flex items-center gap-1 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-                          >
-                            <FileText className="h-3.5 w-3.5" />
-                            <span>Brief</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onOpenProject(p.id, 'docs')}
-                            className="inline-flex items-center gap-1 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-                          >
-                            <Files className="h-3.5 w-3.5" />
-                            <span>Docs</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onOpenProject(p.id, 'board')}
-                            className="inline-flex items-center gap-1 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-                          >
-                            <FileSpreadsheet className="h-3.5 w-3.5" />
-                            <span>Board</span>
-                          </button>
-                        </div>
-
-                        {p.driveFolderUrl && (
-                          <a
-                            href={p.driveFolderUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-                          >
-                            <span>Drive</span>
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
                         )}
                       </div>
                     </div>

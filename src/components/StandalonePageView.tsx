@@ -10,9 +10,12 @@ import {
   FilePlus2,
   FileText,
   Image as ImageIcon,
+  Maximize2,
   MoreHorizontal,
+  PanelRight,
   RefreshCw,
   Trash2,
+  X,
 } from 'lucide-react';
 import { DocBlock, StandalonePage } from '../types/workspace';
 import { COVER_PRESETS } from '../lib/coverAssets';
@@ -25,6 +28,10 @@ interface StandalonePageViewProps {
   isSyncing: boolean;
   autoSyncEnabled: boolean;
   fullWidth?: boolean;
+  isSidePeek?: boolean;
+  onExpandToFullScreen?: () => void;
+  onOpenInSidePeek?: () => void;
+  onCloseSidePeek?: () => void;
   onTitleChange: (title: string) => void;
   onIconChange: (icon: string) => void;
   onCoverChange: (coverUrl: string | null) => void;
@@ -46,6 +53,10 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
   isSyncing,
   autoSyncEnabled,
   fullWidth = false,
+  isSidePeek = false,
+  onExpandToFullScreen,
+  onOpenInSidePeek,
+  onCloseSidePeek,
   onTitleChange,
   onIconChange,
   onCoverChange,
@@ -66,12 +77,43 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
     : null;
   const subPages = allPages.filter((p) => p.parentDocId === page.id);
 
-  const containerClass = fullWidth
+  const containerClass = isSidePeek
+    ? 'w-full px-5 sm:px-7 transition-all duration-200'
+    : fullWidth
     ? 'w-full max-w-none px-4 sm:px-6 transition-all duration-200'
     : 'mx-auto max-w-[960px] px-6 lg:px-10 transition-all duration-200';
 
   return (
     <div className="min-h-full pb-20">
+      {/* Notion-style Top View Mode Bar when in Side Peek */}
+      {isSidePeek && (
+        <div className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-neutral-200/80 bg-white/95 px-4 py-2.5 backdrop-blur-xs dark:border-neutral-800 dark:bg-[#191918]/95">
+          <div className="flex items-center gap-1.5">
+            {onExpandToFullScreen && (
+              <button
+                type="button"
+                onClick={onExpandToFullScreen}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-[#F8F8F7] px-2.5 py-1 text-xs font-medium text-neutral-800 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-100 dark:hover:bg-neutral-800"
+                title="Expand to full screen"
+              >
+                <Maximize2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                <span>Full Screen</span>
+              </button>
+            )}
+          </div>
+          {onCloseSidePeek && (
+            <button
+              type="button"
+              onClick={onCloseSidePeek}
+              className="rounded-lg p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              title="Close side view"
+              aria-label="Close side view"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      )}
       {/* Cover Header */}
       <AnimatePresence initial={false}>
         {page.coverUrl ? (
@@ -226,61 +268,77 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
           />
         </div>
 
-        {/* Google Doc Sync Bar & Actions */}
+        {/* Minimal Doc Sync Bar & Actions */}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-y border-neutral-200/80 py-2.5 text-xs dark:border-neutral-800">
-          <div className="flex flex-wrap items-center gap-3">
-            <a
-              href={page.docUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 font-medium text-neutral-800 hover:underline dark:text-neutral-200"
-            >
-              <FileText className="h-3.5 w-3.5 text-blue-600" />
-              <span>Standalone Google Doc</span>
-              <ExternalLink className="h-3 w-3 text-neutral-400" />
-            </a>
-            <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">
-              ·
-            </span>
+          <div className="flex flex-wrap items-center gap-2.5 text-neutral-500 dark:text-neutral-400">
+            {page.docUrl && (
+              <>
+                <a
+                  href={page.docUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 font-medium text-neutral-700 hover:text-neutral-950 hover:underline dark:text-neutral-300 dark:hover:text-white"
+                >
+                  <FileText className="h-3.5 w-3.5 text-blue-600" />
+                  <span>Google Doc</span>
+                  <ExternalLink className="h-3 w-3 opacity-60" />
+                </a>
+                <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">
+                  ·
+                </span>
+              </>
+            )}
             {isSyncing ? (
-              <span className="inline-flex items-center gap-1 font-medium text-blue-600 dark:text-blue-400">
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                <span>Syncing to Google Docs...</span>
+              <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                <span>Syncing</span>
               </span>
             ) : page.dirty ? (
-              <span className="font-medium text-amber-700 dark:text-amber-400">
-                {autoSyncEnabled ? 'Auto-sync scheduled' : 'Unsynced local edits'}
+              <span className="font-medium text-amber-600 dark:text-amber-400">
+                {autoSyncEnabled ? 'Auto-syncing' : 'Unsynced'}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                <span>Synced with Google Docs</span>
+              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="h-3 w-3" />
+                <span>Synced</span>
               </span>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {!isSidePeek && onOpenInSidePeek && (
+              <button
+                type="button"
+                onClick={onOpenInSidePeek}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+                title="Switch to Side View"
+              >
+                <PanelRight className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                <span>Side View</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onCreateSubPage('Untitled Sub-Page')}
               className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
             >
               <FilePlus2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-              <span>New Sub-Page</span>
+              <span>Sub-Page</span>
             </button>
 
             <button
               type="button"
               onClick={onPullPage}
               disabled={isPulling || isSyncing}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-600 transition-colors hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-300 dark:hover:bg-neutral-800"
+              title="Pull latest from Google Docs"
+              aria-label="Pull latest"
             >
               {isPulling ? (
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <ArrowDownToLine className="h-3.5 w-3.5" />
               )}
-              <span>Pull</span>
             </button>
 
             <button
@@ -290,7 +348,7 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
               className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 disabled:opacity-35 dark:bg-blue-600 dark:hover:bg-blue-500 whitespace-nowrap shrink-0"
             >
               <ArrowUpFromLine className="h-3.5 w-3.5" />
-              <span>Save to Google Doc</span>
+              <span>Save</span>
             </button>
 
             {/* 3-Dot Options Menu */}
@@ -300,6 +358,7 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
                 onClick={() => setShowMoreMenu((v) => !v)}
                 className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-300 dark:hover:bg-neutral-800"
                 title="Page options"
+                aria-label="Page options"
               >
                 <MoreHorizontal className="h-4 w-4" />
               </button>
@@ -310,7 +369,7 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
                     initial={{ opacity: 0, y: 4, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 4, scale: 0.96 }}
-                    className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl dark:border-neutral-700 dark:bg-[#242422]"
+                    className="absolute right-0 top-full z-30 mt-1.5 w-48 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl dark:border-neutral-700 dark:bg-[#242422]"
                   >
                     <button
                       type="button"
@@ -321,7 +380,7 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
                       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
                     >
                       <EyeOff className="h-3.5 w-3.5 text-amber-600" />
-                      <span>Remove from Here (Keep in Drive)</span>
+                      <span>Remove from Folio</span>
                     </button>
 
                     <button
@@ -333,7 +392,7 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
                       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                      <span>Delete Permanently from Drive</span>
+                      <span>Delete Permanently</span>
                     </button>
                   </motion.div>
                 )}

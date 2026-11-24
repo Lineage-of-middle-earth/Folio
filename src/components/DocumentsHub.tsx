@@ -11,6 +11,7 @@ import {
   Link2,
   ListChecks,
   Maximize2,
+  PanelRight,
   Plus,
   RefreshCw,
   X,
@@ -77,6 +78,8 @@ export const DocumentsHub: React.FC<DocumentsHubProps> = ({
   const [showCreator, setShowCreator] = useState(false);
   const [newDocTitle, setNewDocTitle] = useState('');
   const [newDocTemplate, setNewDocTemplate] = useState<TaskDocTemplate>('spec');
+  const [docViewMode, setDocViewMode] = useState<'side' | 'fullscreen'>('side');
+  const [creatorOpenMode, setCreatorOpenMode] = useState<'side' | 'fullscreen'>('side');
 
   const activeDoc =
     project.extraDocs.find((d) => d.id === selectedDocId) || null;
@@ -141,6 +144,7 @@ export const DocumentsHub: React.FC<DocumentsHubProps> = ({
     e.preventDefault();
     const cleanTitle = newDocTitle.trim() || 'Untitled Document';
     const blocks = buildStandaloneDocStarterBlocks(cleanTitle, newDocTemplate);
+    setDocViewMode(creatorOpenMode);
     onCreateNewDoc(cleanTitle, blocks);
     setNewDocTitle('');
     setShowCreator(false);
@@ -247,21 +251,55 @@ export const DocumentsHub: React.FC<DocumentsHubProps> = ({
               })}
             </div>
 
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowCreator(false)}
-                className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-200"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500"
-              >
-                <FilePlus2 className="h-3.5 w-3.5" />
-                <span>Create Google Doc Page</span>
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                  Open in:
+                </span>
+                <div className="inline-flex rounded-lg border border-neutral-200 bg-white p-0.5 text-xs dark:border-neutral-700 dark:bg-[#191918]">
+                  <button
+                    type="button"
+                    onClick={() => setCreatorOpenMode('side')}
+                    className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors ${
+                      creatorOpenMode === 'side'
+                        ? 'bg-neutral-900 text-white dark:bg-blue-600'
+                        : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400'
+                    }`}
+                  >
+                    <PanelRight className="h-3 w-3" />
+                    <span>Side View</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCreatorOpenMode('fullscreen')}
+                    className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 font-medium transition-colors ${
+                      creatorOpenMode === 'fullscreen'
+                        ? 'bg-neutral-900 text-white dark:bg-blue-600'
+                        : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400'
+                    }`}
+                  >
+                    <Maximize2 className="h-3 w-3" />
+                    <span>Full Screen</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreator(false)}
+                  className="rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500"
+                >
+                  <FilePlus2 className="h-3.5 w-3.5" />
+                  <span>Create Google Doc Page</span>
+                </button>
+              </div>
             </div>
           </motion.form>
         )}
@@ -386,9 +424,32 @@ export const DocumentsHub: React.FC<DocumentsHubProps> = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <span className="rounded p-1 text-neutral-400 opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDocViewMode('side');
+                      onSelectDocId(doc.id);
+                    }}
+                    className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                    title="Open in Notion-style Side View"
+                    aria-label={`Open ${doc.title} in Side View`}
+                  >
+                    <PanelRight className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDocViewMode('fullscreen');
+                      onSelectDocId(doc.id);
+                    }}
+                    className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                    title="Open Full Screen"
+                    aria-label={`Open ${doc.title} Full Screen`}
+                  >
                     <Maximize2 className="h-3.5 w-3.5" />
-                  </span>
+                  </button>
                   <a
                     href={doc.url}
                     target="_blank"
@@ -482,66 +543,92 @@ export const DocumentsHub: React.FC<DocumentsHubProps> = ({
         )}
       </div>
 
-      {/* Whole-Screen Standalone Document Editor Overlay */}
+      {/* Side View (Notion Peek) or Whole-Screen Standalone Document Editor Overlay */}
       <AnimatePresence>
         {activeDoc && (
-          <motion.div
-            key="extra-doc-fullscreen"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed inset-0 z-40 flex flex-col bg-white dark:bg-[#191918]"
-          >
-            <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-neutral-200 px-4 dark:border-neutral-800 sm:px-6">
-              <div className="flex min-w-0 items-center gap-2.5">
-                {activeParent && onBackToParent ? (
+          <>
+            {docViewMode === 'side' && (
+              <motion.div
+                key="extra-doc-backdrop"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.16 }}
+                onClick={() => onSelectDocId(null)}
+                className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px]"
+              />
+            )}
+            <motion.div
+              key="extra-doc-overlay"
+              initial={
+                docViewMode === 'side'
+                  ? { opacity: 0, x: 48 }
+                  : { opacity: 0, y: 12 }
+              }
+              animate={{ opacity: 1, x: 0, y: 0 }}
+              exit={
+                docViewMode === 'side'
+                  ? { opacity: 0, x: 48 }
+                  : { opacity: 0, y: 10 }
+              }
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className={
+                docViewMode === 'side'
+                  ? 'fixed inset-y-0 right-0 z-40 flex w-full max-w-[680px] flex-col border-l border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-[#191918]'
+                  : 'fixed inset-0 z-40 flex flex-col bg-white dark:bg-[#191918]'
+              }
+            >
+              <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-neutral-200 px-4 dark:border-neutral-800 sm:px-5">
+                <div className="flex min-w-0 items-center gap-2">
+                  {/* Notion-style Side View <-> Full Screen Toggle Button */}
                   <button
                     type="button"
-                    onClick={() => onBackToParent(activeParent.id)}
-                    className="inline-flex max-w-[240px] items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 shrink-0"
-                    title={`Back to ${activeParent.title}`}
+                    onClick={() =>
+                      setDocViewMode((curr) =>
+                        curr === 'side' ? 'fullscreen' : 'side'
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-[#F8F8F7] px-2.5 py-1 text-xs font-medium text-neutral-800 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-100 dark:hover:bg-neutral-800 shrink-0"
+                    title={
+                      docViewMode === 'side'
+                        ? 'Expand to Full Screen'
+                        : 'Switch to Notion Side View'
+                    }
                   >
-                    <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">Back to {activeParent.title}</span>
+                    {docViewMode === 'side' ? (
+                      <>
+                        <Maximize2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                        <span>Full Screen</span>
+                      </>
+                    ) : (
+                      <>
+                        <PanelRight className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                        <span>Side View</span>
+                      </>
+                    )}
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onSelectDocId(null)}
-                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 whitespace-nowrap shrink-0"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                    <span>Back to Documents</span>
-                  </button>
-                )}
-                <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">
-                  /
-                </span>
-                <span className="flex items-center gap-1.5 truncate text-xs text-neutral-500 dark:text-neutral-400">
-                  <FileText className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
-                  <span className="truncate font-medium text-neutral-800 dark:text-neutral-200">
-                    {activeDoc.title}
-                  </span>
-                </span>
-                {syncingDocIds[activeDoc.id] ? (
-                  <span className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 whitespace-nowrap shrink-0">
-                    <RefreshCw className="h-3 w-3 animate-spin" />
-                    <span>Syncing...</span>
-                  </span>
-                ) : activeDoc.dirty ? (
-                  <span className="text-xs font-medium text-amber-700 dark:text-amber-400 whitespace-nowrap shrink-0">
-                    {autoSyncEnabled ? 'Auto-sync pending' : 'Unsynced edits'}
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400 whitespace-nowrap shrink-0">
-                    <CheckCircle2 className="h-3 w-3" />
-                    <span>Synced with Google Docs</span>
-                  </span>
-                )}
-              </div>
 
-              <div className="flex items-center gap-1.5 shrink-0">
+                  {activeParent && onBackToParent ? (
+                    <button
+                      type="button"
+                      onClick={() => onBackToParent(activeParent.id)}
+                      className="inline-flex max-w-[180px] items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 shrink-0"
+                      title={`Back to ${activeParent.title}`}
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{activeParent.title}</span>
+                    </button>
+                  ) : null}
+
+                  <span className="hidden items-center gap-1.5 truncate text-xs text-neutral-500 dark:text-neutral-400 sm:flex">
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                    <span className="truncate font-medium text-neutral-800 dark:text-neutral-200">
+                      {activeDoc.title}
+                    </span>
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
                 <a
                   href={activeDoc.url}
                   target="_blank"
@@ -660,8 +747,9 @@ export const DocumentsHub: React.FC<DocumentsHubProps> = ({
               </div>
             </div>
           </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
+        </>
+      )}
+    </AnimatePresence>
+  </div>
+);
 };

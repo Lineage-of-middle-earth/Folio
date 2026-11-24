@@ -10,25 +10,37 @@ import {
   RefreshCw,
   Search,
 } from 'lucide-react';
-import { DriveFileItem } from '../types/workspace';
+import { DocBlock, DriveFileItem, ProjectWorkspace } from '../types/workspace';
 import { searchDriveFiles } from '../lib/googleWorkspaceApi';
+import { DriveGuidelinePanel } from './DriveGuidelinePanel';
 
 interface DriveBrowserViewProps {
   token: string | null;
   isGuestMode?: boolean;
   localFiles?: DriveFileItem[];
+  projects?: ProjectWorkspace[];
   rootFolderUrl: string | null;
   onImportAsProject: (file: DriveFileItem) => Promise<void>;
+  onCreateOrganizedDocument?: (options: {
+    title: string;
+    destination: 'standalone' | 'project';
+    projectId?: string;
+    blocks: DocBlock[];
+  }) => void;
   onExportLocalBackup?: () => void;
+  onReconnectDrive?: () => void;
 }
 
 export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
   token,
   isGuestMode = false,
   localFiles = [],
+  projects = [],
   rootFolderUrl,
   onImportAsProject,
+  onCreateOrganizedDocument,
   onExportLocalBackup,
+  onReconnectDrive,
 }) => {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'folder' | 'sheet' | 'doc'>('all');
@@ -91,20 +103,10 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-6 px-6 py-8 lg:px-10">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            {isGuestMode ? 'Guest Mode · Local Browser Storage' : 'Google Drive Explorer'}
-          </p>
-          <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
-            {isGuestMode ? 'Local Workspace Files' : 'Browse & Import Drive Files'}
-          </h1>
-          <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            {isGuestMode
-              ? 'All documents, spreadsheets, and uploaded assets saved locally in your browser during Guest Mode.'
-              : 'Search across your Google Drive and bring existing folders, Sheets, or Docs directly into Folio.'}
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
+          {isGuestMode ? 'Local Files' : 'Drive'}
+        </h1>
 
         <div className="flex items-center gap-2">
           <button
@@ -121,7 +123,7 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
               onClick={onExportLocalBackup}
               className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500 whitespace-nowrap shrink-0"
             >
-              <span>Download Local Backup (.json)</span>
+              <span>Export Backup</span>
             </button>
           )}
           {!isGuestMode && rootFolderUrl && (
@@ -131,12 +133,20 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500 whitespace-nowrap shrink-0"
             >
-              <span>Open Folio Folder</span>
+              <span>Open Drive</span>
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           )}
         </div>
       </div>
+
+      {/* Collapsible Drive Editing & Organization Guide */}
+      <DriveGuidelinePanel
+        isGuestMode={isGuestMode}
+        projects={projects}
+        compact
+        onCreateOrganizedDocument={onCreateOrganizedDocument}
+      />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="relative flex-1 min-w-[220px] max-w-md">
@@ -145,7 +155,7 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search Google Drive..."
+            placeholder="Search files..."
             className="w-full rounded-lg border border-neutral-200 bg-white py-2 pl-9 pr-3 text-sm text-neutral-900 outline-none focus:border-neutral-400 dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-100"
           />
         </div>
@@ -192,10 +202,10 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
         <table className="w-full border-collapse text-left text-xs">
           <thead>
             <tr className="border-b border-neutral-200 bg-[#F8F8F7] text-neutral-500 dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-400">
-              <th className="px-4 py-2.5 font-medium">File Name</th>
-              <th className="w-36 px-4 py-2.5 font-medium">Workspace App</th>
+              <th className="px-4 py-2.5 font-medium">Name</th>
+              <th className="w-36 px-4 py-2.5 font-medium">Type</th>
               <th className="w-32 px-4 py-2.5 font-medium">Modified</th>
-              <th className="w-40 px-4 py-2.5 text-right font-medium">Actions</th>
+              <th className="w-36 px-4 py-2.5 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
@@ -207,10 +217,30 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
                   </td>
                 </tr>
               ))
+            ) : !isGuestMode && !token ? (
+              <tr>
+                <td colSpan={4} className="px-4 py-12 text-center">
+                  <div className="mx-auto flex max-w-sm flex-col items-center gap-3">
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                      You are signed in. Reconnect Google Drive to browse live files in this tab.
+                    </p>
+                    {onReconnectDrive && (
+                      <button
+                        type="button"
+                        onClick={onReconnectDrive}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        <span>Reconnect Google Drive</span>
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
             ) : files.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-12 text-center text-neutral-500">
-                  No Google Drive files match this search.
+                <td colSpan={4} className="px-4 py-12 text-center text-neutral-400">
+                  No matching files.
                 </td>
               </tr>
             ) : (
@@ -267,7 +297,7 @@ export const DriveBrowserView: React.FC<DriveBrowserViewProps> = ({
                           >
                             <FolderPlus className="h-3 w-3" />
                             <span>
-                              {importingId === file.id ? 'Opening...' : 'Open in Folio'}
+                              {importingId === file.id ? 'Opening...' : 'Open'}
                             </span>
                           </button>
                         )}

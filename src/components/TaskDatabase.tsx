@@ -15,6 +15,8 @@ import {
   Kanban,
   Link2,
   ListChecks,
+  Maximize2,
+  PanelRight,
   Plus,
   RefreshCw,
   Search,
@@ -125,6 +127,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [taskViewMode, setTaskViewMode] = useState<'side' | 'fullscreen'>('side');
   const [showNewDocForTaskId, setShowNewDocForTaskId] = useState<string | null>(null);
 
   // Per-task local draft state before a Google Doc is created
@@ -726,59 +729,99 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
         </div>
       )}
 
-      {/* Whole-Screen Task Document View */}
+      {/* Side View (Notion Peek) or Whole-Screen Task Document View */}
       <AnimatePresence>
         {selectedTask && (
-          <motion.div
-            key="task-fullscreen-page"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed inset-0 z-40 flex flex-col bg-white dark:bg-[#191918]"
-          >
-            {/* Whole-Screen Top Bar */}
-            <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-neutral-200 px-4 dark:border-neutral-800 sm:px-6">
-              <div className="flex min-w-0 items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSelectedTaskId(null)}
-                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 whitespace-nowrap shrink-0"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  <span>Back to Tasks</span>
-                </button>
-                <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">
-                  /
-                </span>
-                <span className="flex items-center gap-1.5 truncate text-xs text-neutral-500 dark:text-neutral-400">
-                  <FileText className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
-                  <span className="truncate font-medium text-neutral-800 dark:text-neutral-200">
-                    {selectedTask.docTitle || selectedTask.title || 'Task Document'}
+          <>
+            {taskViewMode === 'side' && (
+              <motion.div
+                key="task-side-backdrop"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.16 }}
+                onClick={() => setSelectedTaskId(null)}
+                className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px]"
+              />
+            )}
+            <motion.div
+              key="task-fullscreen-page"
+              initial={
+                taskViewMode === 'side'
+                  ? { opacity: 0, x: 48 }
+                  : { opacity: 0, y: 12 }
+              }
+              animate={{ opacity: 1, x: 0, y: 0 }}
+              exit={
+                taskViewMode === 'side'
+                  ? { opacity: 0, x: 48 }
+                  : { opacity: 0, y: 10 }
+              }
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className={
+                taskViewMode === 'side'
+                  ? 'fixed inset-y-0 right-0 z-40 flex w-full max-w-[680px] flex-col border-l border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-[#191918]'
+                  : 'fixed inset-0 z-40 flex flex-col bg-white dark:bg-[#191918]'
+              }
+            >
+              {/* Top Bar with Side View <-> Full Screen Toggle */}
+              <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-neutral-200 px-4 dark:border-neutral-800 sm:px-5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTaskViewMode((curr) =>
+                        curr === 'side' ? 'fullscreen' : 'side'
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-[#F8F8F7] px-2.5 py-1 text-xs font-medium text-neutral-800 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-100 dark:hover:bg-neutral-800 shrink-0"
+                    title={
+                      taskViewMode === 'side'
+                        ? 'Expand to Full Screen'
+                        : 'Switch to Notion Side View'
+                    }
+                  >
+                    {taskViewMode === 'side' ? (
+                      <>
+                        <Maximize2 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                        <span>Full Screen</span>
+                      </>
+                    ) : (
+                      <>
+                        <PanelRight className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                        <span>Side View</span>
+                      </>
+                    )}
+                  </button>
+
+                  <span className="flex items-center gap-1.5 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                    <span className="truncate font-medium text-neutral-800 dark:text-neutral-200">
+                      {selectedTask.docTitle || selectedTask.title || 'Task Document'}
+                    </span>
                   </span>
-                </span>
-                {selectedTask.docId ? (
-                  syncingTaskDocIds[selectedTask.id] ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 whitespace-nowrap shrink-0">
-                      <RefreshCw className="h-3 w-3 animate-spin" />
-                      <span>Syncing...</span>
-                    </span>
-                  ) : selectedTask.dirtyTaskDoc ? (
-                    <span className="text-xs font-medium text-amber-700 dark:text-amber-400 whitespace-nowrap shrink-0">
-                      {autoSyncEnabled ? 'Auto-sync pending' : 'Unsynced edits'}
-                    </span>
+                  {selectedTask.docId ? (
+                    syncingTaskDocIds[selectedTask.id] ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 whitespace-nowrap shrink-0">
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                        <span>Syncing...</span>
+                      </span>
+                    ) : selectedTask.dirtyTaskDoc ? (
+                      <span className="text-xs font-medium text-amber-700 dark:text-amber-400 whitespace-nowrap shrink-0">
+                        {autoSyncEnabled ? 'Auto-sync pending' : 'Unsynced edits'}
+                      </span>
+                    ) : (
+                      <span className="hidden items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400 whitespace-nowrap shrink-0 sm:inline-flex">
+                        <CheckCircle2 className="h-3 w-3" />
+                        <span>Synced</span>
+                      </span>
+                    )
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400 whitespace-nowrap shrink-0">
-                      <CheckCircle2 className="h-3 w-3" />
-                      <span>Synced with Google Docs</span>
+                    <span className="text-xs text-neutral-400 whitespace-nowrap shrink-0">
+                      Draft Doc
                     </span>
-                  )
-                ) : (
-                  <span className="text-xs text-neutral-400 whitespace-nowrap shrink-0">
-                    Draft Doc
-                  </span>
-                )}
-              </div>
+                  )}
+                </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
                 {selectedTask.docId && (
@@ -1275,6 +1318,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
               )}
             </AnimatePresence>
           </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>

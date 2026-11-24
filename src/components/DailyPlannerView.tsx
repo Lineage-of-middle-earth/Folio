@@ -29,6 +29,20 @@ const DEFAULT_TAGS = ['Work', 'Personal'];
 
 const LEGACY_SEEDED_NOTE_PREFIX = 'Morning Focus:\n- Finalize top 3 outcomes for today';
 
+const LEGACY_SEEDED_TASK_TITLES = new Set([
+  'Review today’s key priorities',
+  "Review today's key priorities",
+  'Complete deep work session',
+  'Evening walk & recharge',
+]);
+
+const LEGACY_SEEDED_HABIT_TITLES = new Set([
+  'Plan top 3 priorities',
+  '90m deep focus block',
+  '30m movement / walk',
+  'Read 20 pages',
+]);
+
 export type TagColorKey =
   | 'blue'
   | 'emerald'
@@ -228,88 +242,44 @@ function sanitizeLegacyNotes(
   return cleaned;
 }
 
-function createInitialPlannerState(todayKey: string): DailyPlannerState {
-  const yesterdayKey = addDays(todayKey, -1);
+function sanitizeLegacyTasks(
+  tasksByDate: Record<string, DailyTaskItem[]> | undefined
+): Record<string, DailyTaskItem[]> {
+  if (!tasksByDate) return {};
+  const cleaned: Record<string, DailyTaskItem[]> = {};
+  for (const [dateKey, tasks] of Object.entries(tasksByDate)) {
+    if (!Array.isArray(tasks)) continue;
+    const filtered = tasks.filter(
+      (t) => !LEGACY_SEEDED_TASK_TITLES.has((t.title || '').trim())
+    );
+    if (filtered.length > 0) {
+      cleaned[dateKey] = filtered;
+    }
+  }
+  return cleaned;
+}
 
+function sanitizeLegacyHabits(
+  habits: DailyHabitItem[] | undefined
+): DailyHabitItem[] {
+  if (!Array.isArray(habits)) return [];
+  return habits.filter(
+    (h) => !LEGACY_SEEDED_HABIT_TITLES.has((h.title || '').trim())
+  );
+}
+
+function createInitialPlannerState(): DailyPlannerState {
   return {
-    customTags: ['Focus'],
+    customTags: [],
     tagColors: {
       Work: 'blue',
       Personal: 'emerald',
-      Focus: 'violet',
     },
-    tasksByDate: {
-      [todayKey]: [
-        {
-          id: uid('dtask'),
-          date: todayKey,
-          title: 'Review today’s key priorities',
-          completed: true,
-          starred: true,
-          tag: 'Work',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: uid('dtask'),
-          date: todayKey,
-          title: 'Complete deep work session',
-          completed: false,
-          starred: false,
-          tag: 'Focus',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: uid('dtask'),
-          date: todayKey,
-          title: 'Evening walk & recharge',
-          completed: false,
-          starred: false,
-          tag: 'Personal',
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    },
+    tasksByDate: {},
     notesByDate: {},
     ideasByDate: {},
     highlightsByDate: {},
-    habits: [
-      {
-        id: uid('habit'),
-        title: 'Plan top 3 priorities',
-        category: 'Work',
-        completedDates: {
-          [yesterdayKey]: true,
-          [todayKey]: true,
-        },
-        starredDates: {},
-      },
-      {
-        id: uid('habit'),
-        title: '90m deep focus block',
-        category: 'Work',
-        completedDates: {
-          [yesterdayKey]: true,
-        },
-        starredDates: {},
-      },
-      {
-        id: uid('habit'),
-        title: '30m movement / walk',
-        category: 'Personal',
-        completedDates: {
-          [yesterdayKey]: true,
-          [todayKey]: true,
-        },
-        starredDates: {},
-      },
-      {
-        id: uid('habit'),
-        title: 'Read 20 pages',
-        category: 'Personal',
-        completedDates: {},
-        starredDates: {},
-      },
-    ],
+    habits: [],
   };
 }
 
@@ -344,16 +314,15 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
         const parsed = JSON.parse(raw) as DailyPlannerState;
         if (parsed && typeof parsed === 'object' && parsed.tasksByDate && parsed.habits) {
           return {
-            tasksByDate: parsed.tasksByDate || {},
+            tasksByDate: sanitizeLegacyTasks(parsed.tasksByDate),
             notesByDate: sanitizeLegacyNotes(parsed.notesByDate),
             ideasByDate: parsed.ideasByDate || {},
             highlightsByDate: parsed.highlightsByDate || {},
-            habits: parsed.habits || [],
-            customTags: parsed.customTags || ['Focus'],
+            habits: sanitizeLegacyHabits(parsed.habits),
+            customTags: (parsed.customTags || []).filter((t) => t !== 'Focus'),
             tagColors: parsed.tagColors || {
               Work: 'blue',
               Personal: 'emerald',
-              Focus: 'violet',
             },
           };
         }
@@ -361,7 +330,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     } catch {
       // Fallback to default state
     }
-    return createInitialPlannerState(todayKey);
+    return createInitialPlannerState();
   });
 
   useEffect(() => {
@@ -385,8 +354,16 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
   const [showNewHabitInput, setShowNewHabitInput] = useState(false);
 
   const [newHighlightText, setNewHighlightText] = useState('');
-  const [showAllStarredList, setShowAllStarredList] = useState(false);
-  const [starredListScope, setStarredListScope] = useState<'all' | 'selected'>('all');
+  const [newHighlightDate, setNewHighlightDate] = useState<string>(todayKey);
+  const [activeSubPage, setActiveSubPage] = useState<'planner' | 'starred'>('planner');
+  const [activeWritingTab, setActiveWritingTab] = useState<'notes' | 'ideas'>('notes');
+  const [starredSearchQuery, setStarredSearchQuery] = useState('');
+  const [starredKindFilter, setStarredKindFilter] = useState<
+    'all' | 'realization' | 'task' | 'habit'
+  >('all');
+  const [starredMonthFilter, setStarredMonthFilter] = useState<string>('all');
+  const [starredSortOrder, setStarredSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [starredLayout, setStarredLayout] = useState<'timeline' | 'table'>('timeline');
 
   const allTags = useMemo(() => {
     const merged = [...DEFAULT_TAGS];
@@ -498,13 +475,64 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     return map;
   }, [allStarredEntries]);
 
-  const selectedDateStarredEntries = useMemo(
-    () => allStarredEntries.filter((e) => e.dateKey === selectedDate),
-    [allStarredEntries, selectedDate]
-  );
+  // Available months that have starred entries for quick navigation
+  const availableStarredMonths = useMemo(() => {
+    const monthSet = new Set<string>();
+    for (const entry of allStarredEntries) {
+      monthSet.add(entry.dateKey.slice(0, 7)); // YYYY-MM
+    }
+    return Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+  }, [allStarredEntries]);
 
-  const displayedStarredEntries =
-    starredListScope === 'selected' ? selectedDateStarredEntries : allStarredEntries;
+  const filteredStarredPageEntries = useMemo(() => {
+    const q = starredSearchQuery.trim().toLowerCase();
+    const filtered = allStarredEntries.filter((entry) => {
+      if (starredKindFilter !== 'all' && entry.kind !== starredKindFilter) {
+        return false;
+      }
+      if (
+        starredMonthFilter !== 'all' &&
+        !entry.dateKey.startsWith(starredMonthFilter)
+      ) {
+        return false;
+      }
+      if (q) {
+        const hay = `${entry.title} ${entry.tagOrSub || ''} ${entry.dateKey} ${formatFullDate(
+          entry.dateKey
+        )}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    return [...filtered].sort((a, b) =>
+      starredSortOrder === 'newest'
+        ? b.dateKey.localeCompare(a.dateKey)
+        : a.dateKey.localeCompare(b.dateKey)
+    );
+  }, [
+    allStarredEntries,
+    starredKindFilter,
+    starredMonthFilter,
+    starredSearchQuery,
+    starredSortOrder,
+  ]);
+
+  const groupedStarredByDate = useMemo(() => {
+    const groups: Array<{ dateKey: string; items: StarredEntry[] }> = [];
+    const map = new Map<string, StarredEntry[]>();
+    for (const item of filteredStarredPageEntries) {
+      const existing = map.get(item.dateKey);
+      if (existing) {
+        existing.push(item);
+      } else {
+        const arr = [item];
+        map.set(item.dateKey, arr);
+        groups.push({ dateKey: item.dateKey, items: arr });
+      }
+    }
+    return groups;
+  }, [filteredStarredPageEntries]);
 
   const calendarDays = useMemo(() => {
     const { year, month } = visibleMonth;
@@ -559,6 +587,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
 
   const selectDateAndSyncMonth = (dateKey: string) => {
     setSelectedDate(dateKey);
+    setNewHighlightDate(dateKey);
     const dt = parseDateKey(dateKey);
     setVisibleMonth({ year: dt.getFullYear(), month: dt.getMonth() });
   };
@@ -596,12 +625,12 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     setNewTaskStarred(false);
   };
 
-  const toggleTaskCompleted = (taskId: string) => {
+  const toggleTaskCompleted = (taskId: string, dateKey = selectedDate) => {
     setPlanner((prev) => ({
       ...prev,
       tasksByDate: {
         ...prev.tasksByDate,
-        [selectedDate]: (prev.tasksByDate[selectedDate] || []).map((t) =>
+        [dateKey]: (prev.tasksByDate[dateKey] || []).map((t) =>
           t.id === taskId ? { ...t, completed: !t.completed } : t
         ),
       },
@@ -730,13 +759,14 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     }));
   };
 
-  const handleAddHighlight = (e: React.FormEvent) => {
+  const handleAddHighlight = (e: React.FormEvent, targetDateKey?: string) => {
     e.preventDefault();
     const clean = newHighlightText.trim();
     if (!clean) return;
+    const dateToUse = targetDateKey || selectedDate;
     const item: DailyHighlightItem = {
       id: uid('hl'),
-      date: selectedDate,
+      date: dateToUse,
       text: clean,
       createdAt: new Date().toISOString(),
     };
@@ -744,8 +774,8 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
       ...prev,
       highlightsByDate: {
         ...(prev.highlightsByDate || {}),
-        [selectedDate]: [
-          ...((prev.highlightsByDate || {})[selectedDate] || []),
+        [dateToUse]: [
+          ...((prev.highlightsByDate || {})[dateToUse] || []),
           item,
         ],
       },
@@ -775,6 +805,14 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     }
   };
 
+  const handleToggleEntryCompletion = (entry: StarredEntry) => {
+    if (entry.kind === 'task') {
+      toggleTaskCompleted(entry.sourceId, entry.dateKey);
+    } else if (entry.kind === 'habit') {
+      toggleHabitOnDate(entry.sourceId, entry.dateKey);
+    }
+  };
+
   const handleNotesChange = (value: string) => {
     setPlanner((prev) => ({
       ...prev,
@@ -795,8 +833,475 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     }));
   };
 
+  const formatMonthKeyLabel = (monthKey: string) => {
+    const [y, m] = monthKey.split('-').map(Number);
+    const dt = new Date(y, (m || 1) - 1, 1);
+    return dt.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  };
+
   const selectedNewTaskTheme = getTagColorTheme(newTaskTag, planner.tagColors);
   const selectedDayHasStar = Boolean(starredCountByDate[selectedDate]);
+
+  const starredRealizationsCount = useMemo(
+    () => allStarredEntries.filter((e) => e.kind === 'realization').length,
+    [allStarredEntries]
+  );
+  const starredTasksCount = useMemo(
+    () => allStarredEntries.filter((e) => e.kind === 'task').length,
+    [allStarredEntries]
+  );
+  const starredHabitsCount = useMemo(
+    () => allStarredEntries.filter((e) => e.kind === 'habit').length,
+    [allStarredEntries]
+  );
+  const totalMarkedDaysCount = useMemo(
+    () => Object.keys(starredCountByDate).length,
+    [starredCountByDate]
+  );
+
+  // Separate Dedicated Page for Important & Starred Markers
+  if (activeSubPage === 'starred') {
+    return (
+      <div
+        className={
+          fullWidth
+            ? 'w-full max-w-none px-4 py-8 sm:px-6'
+            : 'mx-auto max-w-[1080px] px-6 py-8 lg:px-10'
+        }
+      >
+        {/* Top Navigation Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-200/80 pb-4 dark:border-neutral-800">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setActiveSubPage('planner')}
+              className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <span>Back</span>
+            </button>
+            <div className="flex items-center gap-2">
+              <Star className="h-5 w-5 fill-amber-400 text-amber-500" />
+              <h1 className="font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
+                Starred Markers
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-neutral-200 bg-[#F8F8F7] p-0.5 text-xs dark:border-neutral-800 dark:bg-[#20201E]">
+              <button
+                type="button"
+                onClick={() => setStarredLayout('timeline')}
+                className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+                  starredLayout === 'timeline'
+                    ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                    : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400'
+                }`}
+              >
+                Timeline
+              </button>
+              <button
+                type="button"
+                onClick={() => setStarredLayout('table')}
+                className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
+                  starredLayout === 'table'
+                    ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                    : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400'
+                }`}
+              >
+                Table
+              </button>
+            </div>
+
+            {onToggleFullWidth && (
+              <button
+                type="button"
+                onClick={onToggleFullWidth}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                title={fullWidth ? 'Standard width' : 'Full width'}
+                aria-label={fullWidth ? 'Standard width' : 'Full width'}
+              >
+                {fullWidth ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Clean Single-Row Summary Strip */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+          <span className="tabular-nums">
+            <strong className="font-semibold text-neutral-900 dark:text-neutral-100">
+              {allStarredEntries.length}
+            </strong>{' '}
+            total
+          </span>
+          <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+          <span className="tabular-nums">
+            <strong className="font-semibold text-neutral-900 dark:text-neutral-100">
+              {totalMarkedDaysCount}
+            </strong>{' '}
+            day{totalMarkedDaysCount === 1 ? '' : 's'}
+          </span>
+          <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+          <span className="tabular-nums">
+            <strong className="font-semibold text-amber-600 dark:text-amber-400">
+              {starredRealizationsCount}
+            </strong>{' '}
+            realizations
+          </span>
+          <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+          <span className="tabular-nums">
+            <strong className="font-semibold text-blue-600 dark:text-blue-400">
+              {starredTasksCount}
+            </strong>{' '}
+            tasks
+          </span>
+          <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
+          <span className="tabular-nums">
+            <strong className="font-semibold text-emerald-600 dark:text-emerald-400">
+              {starredHabitsCount}
+            </strong>{' '}
+            habits
+          </span>
+        </div>
+
+        {/* Add New Starred Realization / Marker on Any Date */}
+        <form
+          onSubmit={(e) => handleAddHighlight(e, newHighlightDate)}
+          className="mt-5 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200/90 bg-amber-50/30 p-2.5 dark:border-amber-900/50 dark:bg-amber-950/15"
+        >
+          <input
+            type="date"
+            value={newHighlightDate}
+            onChange={(e) => setNewHighlightDate(e.target.value || todayKey)}
+            className="rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 font-mono text-xs text-neutral-800 outline-none focus:border-amber-400 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-200"
+          />
+          <input
+            type="text"
+            value={newHighlightText}
+            onChange={(e) => setNewHighlightText(e.target.value)}
+            placeholder="Add a realization, win, or milestone..."
+            className="min-w-[200px] flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-900 outline-none focus:border-amber-400 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-100"
+          />
+          <button
+            type="submit"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-600 whitespace-nowrap shrink-0"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Add</span>
+          </button>
+        </form>
+
+        {/* Search, Type Filters, Month Navigation & Sort Bar */}
+        <div className="mt-4 space-y-2.5 rounded-xl border border-neutral-200 bg-[#F8F8F7] p-3.5 dark:border-neutral-800 dark:bg-[#20201E]">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            {/* Search Input */}
+            <div className="relative min-w-[220px] flex-1">
+              <input
+                type="text"
+                value={starredSearchQuery}
+                onChange={(e) => setStarredSearchQuery(e.target.value)}
+                placeholder="Search markers..."
+                className="w-full rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-900 outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-100"
+              />
+              {starredSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setStarredSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-neutral-400 hover:text-neutral-700"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Type Filter Buttons */}
+            <div className="flex flex-wrap items-center gap-1">
+              {(
+                [
+                  { id: 'all', label: `All (${allStarredEntries.length})` },
+                  {
+                    id: 'realization',
+                    label: `Realizations (${starredRealizationsCount})`,
+                  },
+                  { id: 'task', label: `Tasks (${starredTasksCount})` },
+                  { id: 'habit', label: `Habits (${starredHabitsCount})` },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setStarredKindFilter(tab.id)}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                    starredKindFilter === tab.id
+                      ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                      : 'bg-white text-neutral-600 hover:bg-neutral-100 dark:bg-[#191918] dark:text-neutral-300 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Sort Order */}
+            <button
+              type="button"
+              onClick={() =>
+                setStarredSortOrder((prev) =>
+                  prev === 'newest' ? 'oldest' : 'newest'
+                )
+              }
+              className="rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-300"
+            >
+              {starredSortOrder === 'newest' ? 'Newest ↓' : 'Oldest ↑'}
+            </button>
+          </div>
+
+          {/* Month Filter Bar */}
+          {availableStarredMonths.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-neutral-200/80 pt-2.5 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setStarredMonthFilter('all')}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  starredMonthFilter === 'all'
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-white text-neutral-600 hover:bg-neutral-100 dark:bg-[#191918] dark:text-neutral-300'
+                }`}
+              >
+                All Months
+              </button>
+              {availableStarredMonths.map((mKey) => {
+                const countInMonth = allStarredEntries.filter((e) =>
+                  e.dateKey.startsWith(mKey)
+                ).length;
+                return (
+                  <button
+                    key={mKey}
+                    type="button"
+                    onClick={() => setStarredMonthFilter(mKey)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                      starredMonthFilter === mKey
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-white text-neutral-600 hover:bg-neutral-100 dark:bg-[#191918] dark:text-neutral-300'
+                    }`}
+                  >
+                    {formatMonthKeyLabel(mKey)} ({countInMonth})
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Main Directory Content: Date Timeline or Compact Table */}
+        <div className="mt-5">
+          {filteredStarredPageEntries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-[#F8F8F7] px-6 py-14 text-center dark:border-neutral-800 dark:bg-[#20201E]">
+              <Star className="h-7 w-7 text-amber-400" />
+              <h2 className="mt-3 font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                No starred markers
+              </h2>
+              <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                Star any task or habit, or add one above.
+              </p>
+            </div>
+          ) : starredLayout === 'timeline' ? (
+            <div className="space-y-5">
+              {groupedStarredByDate.map((group) => (
+                <div
+                  key={group.dateKey}
+                  className="rounded-xl border border-neutral-200 bg-white p-4 shadow-2xs dark:border-neutral-800 dark:bg-[#20201E]"
+                >
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-neutral-100 pb-2.5 dark:border-neutral-800">
+                    <div className="flex items-center gap-2.5">
+                      <span className="inline-flex h-7 items-center rounded-md bg-amber-50 px-2.5 font-mono text-xs font-semibold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                        ★ {group.dateKey}
+                      </span>
+                      <h3 className="font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                        {formatFullDate(group.dateKey)}
+                      </h3>
+                      {group.dateKey === todayKey && (
+                        <span className="rounded bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                          Today
+                        </span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        selectDateAndSyncMonth(group.dateKey);
+                        setActiveSubPage('planner');
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-[#F8F8F7] px-2.5 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-200"
+                    >
+                      <span>Open Day</span>
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+                    {group.items.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="group flex items-center justify-between gap-3 rounded-lg border border-neutral-200/80 bg-[#F8F8F7]/60 px-3.5 py-2.5 transition-colors hover:border-amber-300 hover:bg-white dark:border-neutral-800 dark:bg-[#191918] dark:hover:border-amber-700"
+                      >
+                        <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                          {entry.kind === 'realization' ? (
+                            <Star className="mt-0.5 h-4 w-4 shrink-0 fill-amber-400 text-amber-500" />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleEntryCompletion(entry)}
+                              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
+                                entry.completed
+                                  ? 'border-emerald-600 bg-emerald-600 text-white'
+                                  : 'border-neutral-300 bg-white dark:border-neutral-600 dark:bg-transparent'
+                              }`}
+                              title="Toggle completion"
+                            >
+                              {entry.completed && (
+                                <Check className="h-3 w-3 stroke-[2.5]" />
+                              )}
+                            </button>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div
+                              className={`text-sm font-medium ${
+                                entry.kind !== 'realization' && entry.completed
+                                  ? 'text-neutral-400 line-through dark:text-neutral-500'
+                                  : 'text-neutral-900 dark:text-neutral-100'
+                              }`}
+                            >
+                              {entry.title}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                              <span
+                                className={`rounded px-1.5 py-0.5 font-medium ${
+                                  entry.kind === 'realization'
+                                    ? 'bg-amber-100/80 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                    : entry.kind === 'task'
+                                    ? 'bg-blue-100/80 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300'
+                                    : 'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                }`}
+                              >
+                                {entry.kind === 'realization'
+                                  ? '★ Realization / Win'
+                                  : entry.kind === 'task'
+                                  ? `Task · ${entry.tagOrSub || 'General'}`
+                                  : 'Daily Habit'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              selectDateAndSyncMonth(entry.dateKey);
+                              setActiveSubPage('planner');
+                            }}
+                            className="rounded-md px-2 py-1 text-[11px] font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                            title="Jump to this date in planner"
+                          >
+                            Jump
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUnstarEntry(entry)}
+                            className="rounded-md p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                            title="Remove star marker"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Compact Table View for Quick Scanning of Lots of Markers */
+            <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-[#20201E]">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-neutral-200 bg-[#F8F8F7] text-[11px] font-semibold uppercase tracking-wider text-neutral-500 dark:border-neutral-800 dark:bg-[#191918] dark:text-neutral-400">
+                  <tr>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Category</th>
+                    <th className="px-4 py-3">Starred Item / Realization</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                  {filteredStarredPageEntries.map((entry) => (
+                    <tr
+                      key={entry.id}
+                      className="transition-colors hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40"
+                    >
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs font-medium text-amber-700 dark:text-amber-400">
+                        ★ {entry.dateKey}
+                        <span className="ml-2 font-sans text-neutral-400">
+                          ({formatShortDate(entry.dateKey)})
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <span
+                          className={`rounded px-2 py-0.5 text-[11px] font-medium ${
+                            entry.kind === 'realization'
+                              ? 'bg-amber-100/80 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                              : entry.kind === 'task'
+                              ? 'bg-blue-100/80 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300'
+                              : 'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          }`}
+                        >
+                          {entry.kind === 'realization'
+                            ? 'Realization'
+                            : entry.kind === 'task'
+                            ? `Task · ${entry.tagOrSub || 'Work'}`
+                            : 'Habit'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-medium text-neutral-900 dark:text-neutral-100">
+                        {entry.title}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            selectDateAndSyncMonth(entry.dateKey);
+                            setActiveSubPage('planner');
+                          }}
+                          className="mr-2 rounded-md border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                        >
+                          Open Date →
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUnstarEntry(entry)}
+                          className="rounded-md p-1 text-neutral-400 hover:text-red-600"
+                          title="Remove star"
+                        >
+                          <Trash2 className="inline h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -807,50 +1312,48 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
       }
     >
       {/* Minimal Header */}
-      <div className="flex flex-wrap items-baseline justify-between gap-4 border-b border-neutral-200/80 pb-5 dark:border-neutral-800">
+      <div className="flex flex-wrap items-baseline justify-between gap-4 border-b border-neutral-200/80 pb-4 dark:border-neutral-800">
         <div>
           <div className="flex items-center gap-2.5">
             <h1 className="font-display text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50 sm:text-3xl">
               {formatFullDate(selectedDate)}
             </h1>
             {selectedDayHasStar && (
-              <span
-                className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-800/70 dark:bg-amber-950/50 dark:text-amber-300"
-                title="This day has starred important items or realizations"
+              <button
+                type="button"
+                onClick={() => setActiveSubPage('starred')}
+                className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 hover:underline dark:text-amber-400"
+                title="Open Starred Markers"
               >
                 <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
                 <span className="tabular-nums">
-                  {starredCountByDate[selectedDate]} starred
+                  {starredCountByDate[selectedDate]}
                 </span>
-              </span>
+              </button>
             )}
           </div>
-          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {selectedDate === todayKey ? 'Today' : selectedDate} · Local planner (not synced with Google Calendar)
+          <p className="mt-0.5 text-xs text-neutral-400">
+            {selectedDate === todayKey ? 'Today' : selectedDate}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* Toggle All Starred / Important List */}
+          {/* Open Dedicated Starred / Important Markers Page */}
           <button
             type="button"
-            onClick={() => setShowAllStarredList((v) => !v)}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-              showAllStarredList
-                ? 'border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-600 dark:bg-amber-950/60 dark:text-amber-200'
-                : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-200 dark:hover:bg-neutral-800'
-            }`}
-            title="View list of all starred tasks, habits, and realizations"
+            onClick={() => setActiveSubPage('starred')}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300/90 bg-amber-50/70 px-2.5 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100/80 dark:border-amber-700/70 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-900/50 whitespace-nowrap shrink-0"
+            title="Open Starred Markers page"
           >
             <Star
               className={`h-3.5 w-3.5 ${
                 allStarredEntries.length > 0
                   ? 'fill-amber-400 text-amber-500'
-                  : 'text-neutral-400'
+                  : 'text-amber-500'
               }`}
             />
-            <span>Important & Starred</span>
-            <span className="rounded bg-amber-100/80 px-1.5 py-0.2 font-mono text-[11px] tabular-nums text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+            <span>Starred</span>
+            <span className="font-mono text-[11px] tabular-nums opacity-75">
               {allStarredEntries.length}
             </span>
           </button>
@@ -883,173 +1386,27 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
             <button
               type="button"
               onClick={onToggleFullWidth}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 py-1.5 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 whitespace-nowrap shrink-0"
-              title={
-                fullWidth
-                  ? 'Switch to centered canvas width'
-                  : 'Expand canvas width edge to edge'
-              }
-              aria-label="Toggle edge-to-edge full width"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 shrink-0"
+              title={fullWidth ? 'Standard width' : 'Full width'}
+              aria-label={fullWidth ? 'Standard width' : 'Full width'}
             >
               {fullWidth ? (
                 <Minimize2 className="h-3.5 w-3.5" />
               ) : (
                 <Maximize2 className="h-3.5 w-3.5" />
               )}
-              <span>{fullWidth ? 'Standard Width' : 'Full Width'}</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Expandable Starred & Important List Drawer across All Days */}
-      <AnimatePresence initial={false}>
-        {showAllStarredList && (
-          <motion.section
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.18 }}
-            className="mt-6 rounded-xl border border-amber-200/90 bg-amber-50/40 p-4 dark:border-amber-900/50 dark:bg-amber-950/20"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
-                <h2 className="font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-                  Important Realizations, Tasks & Habits
-                </h2>
-                <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                  · Click any item to jump to that date on the calendar
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <div className="flex rounded-lg border border-neutral-200 bg-white p-0.5 text-xs dark:border-neutral-800 dark:bg-[#191918]">
-                  <button
-                    type="button"
-                    onClick={() => setStarredListScope('all')}
-                    className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
-                      starredListScope === 'all'
-                        ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-                        : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400'
-                    }`}
-                  >
-                    All Dates ({allStarredEntries.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStarredListScope('selected')}
-                    className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
-                      starredListScope === 'selected'
-                        ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-                        : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400'
-                    }`}
-                  >
-                    {formatShortDate(selectedDate)} ({selectedDateStarredEntries.length})
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAllStarredList(false)}
-                  className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-200/60 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-                  aria-label="Close starred list"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Add Realization / Milestone for Selected Date */}
-            <form onSubmit={handleAddHighlight} className="mt-3 flex items-center gap-2">
-              <input
-                type="text"
-                value={newHighlightText}
-                onChange={(e) => setNewHighlightText(e.target.value)}
-                placeholder={`Star something you realized or achieved on ${formatShortDate(selectedDate)}...`}
-                className="flex-1 rounded-lg border border-amber-200/90 bg-white px-3 py-1.5 text-xs text-neutral-900 outline-none focus:border-amber-400 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-100"
-              />
-              <button
-                type="submit"
-                className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 whitespace-nowrap shrink-0"
-              >
-                <Star className="h-3 w-3 fill-white" />
-                <span>Add Starred Note</span>
-              </button>
-            </form>
-
-            {displayedStarredEntries.length === 0 ? (
-              <p className="py-5 text-center text-xs text-neutral-500 dark:text-neutral-400">
-                No starred items yet. Click the ★ icon next to any task or habit—or add a realization above—to mark it on the calendar.
-              </p>
-            ) : (
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {displayedStarredEntries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    onClick={() => selectDateAndSyncMonth(entry.dateKey)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        selectDateAndSyncMonth(entry.dateKey);
-                      }
-                    }}
-                    className={`group flex cursor-pointer items-center justify-between gap-2.5 rounded-lg border bg-white px-3 py-2 text-left transition-colors hover:border-amber-300 dark:bg-[#191918] ${
-                      entry.dateKey === selectedDate
-                        ? 'border-amber-300/90 dark:border-amber-700/70'
-                        : 'border-neutral-200/80 dark:border-neutral-800'
-                    }`}
-                  >
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-medium text-neutral-900 dark:text-neutral-100">
-                          {entry.title}
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-neutral-400">
-                          <span className="font-mono tabular-nums text-amber-700 dark:text-amber-400">
-                            {formatShortDate(entry.dateKey)}
-                          </span>
-                          <span aria-hidden="true">·</span>
-                          <span className="capitalize">{entry.kind}</span>
-                          {entry.tagOrSub && entry.kind === 'task' && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span>{entry.tagOrSub}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleUnstarEntry(entry);
-                      }}
-                      className="rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-neutral-800"
-                      title="Remove star"
-                      aria-label="Remove star"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </motion.section>
-        )}
-      </AnimatePresence>
-
       {/* Calm Two-Column Workspace */}
-      <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-12">
-        {/* Left Column: Calendar + Daily Habits directly below the Calendar */}
-        <div className="space-y-6 lg:col-span-4">
-          {/* 1. Calendar Card */}
-          <div className="rounded-xl border border-neutral-200/90 bg-[#F8F8F7] p-4 dark:border-neutral-800 dark:bg-[#20201E]">
-            <div className="mb-3 flex items-center justify-between">
+      <div className="mt-8 grid grid-cols-1 gap-10 lg:grid-cols-12">
+        {/* Left Column: Calendar, Habits, Quick Realization */}
+        <div className="space-y-7 lg:col-span-4">
+          {/* 1. Calendar */}
+          <div className="rounded-2xl bg-[#F8F8F7] p-4 dark:bg-[#20201E]">
+            <div className="mb-3 flex items-center justify-between px-1">
               <span className="font-display text-xs font-semibold text-neutral-900 dark:text-neutral-100">
                 {monthLabel}
               </span>
@@ -1057,7 +1414,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                 <button
                   type="button"
                   onClick={() => navigateMonth(-1)}
-                  className="rounded p-1 text-neutral-500 hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800"
+                  className="rounded-md p-1 text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800"
                   aria-label="Previous month"
                 >
                   <ChevronLeft className="h-3.5 w-3.5" />
@@ -1065,7 +1422,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                 <button
                   type="button"
                   onClick={() => navigateMonth(1)}
-                  className="rounded p-1 text-neutral-500 hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800"
+                  className="rounded-md p-1 text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800"
                   aria-label="Next month"
                 >
                   <ChevronRight className="h-3.5 w-3.5" />
@@ -1103,7 +1460,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                         ? `${cell.dateKey} · ${starCount} starred item${starCount > 1 ? 's' : ''}`
                         : cell.dateKey
                     }
-                    className={`relative flex h-9 flex-col items-center justify-center rounded-md font-mono text-xs tabular-nums transition-colors ${
+                    className={`relative flex h-9 flex-col items-center justify-center rounded-lg font-mono text-xs tabular-nums transition-colors ${
                       isSelected
                         ? 'bg-neutral-900 font-semibold text-white dark:bg-blue-600'
                         : isToday
@@ -1113,62 +1470,36 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                         : 'text-neutral-400/70 dark:text-neutral-600'
                     }`}
                   >
-                    {/* Small Star on Calendar Cell when day has important/starred item */}
-                    {hasStar && (
+                    <span className="leading-none">{cell.dayNumber}</span>
+                    {hasStar ? (
                       <Star
-                        className={`absolute right-0.5 top-0.5 h-2.5 w-2.5 ${
+                        className={`mt-0.5 h-2.5 w-2.5 shrink-0 ${
                           isSelected
                             ? 'fill-amber-300 text-amber-300'
                             : 'fill-amber-400 text-amber-500'
                         }`}
                       />
-                    )}
-                    <span>{cell.dayNumber}</span>
-                    {hasActivity && (
+                    ) : hasActivity ? (
                       <span
-                        className={`mt-0.5 h-1 w-1 rounded-full ${
-                          hasStar
-                            ? isSelected
-                              ? 'bg-amber-300'
-                              : 'bg-amber-500'
-                            : isSelected
+                        className={`mt-1 h-1 w-1 shrink-0 rounded-full ${
+                          isSelected
                             ? 'bg-white'
                             : 'bg-neutral-400 dark:bg-neutral-500'
                         }`}
                       />
-                    )}
+                    ) : null}
                   </button>
                 );
               })}
             </div>
-
-            {/* Quiet 1-line Summary with Starred Count */}
-            <div className="mt-4 flex items-center justify-between border-t border-neutral-200/80 pt-3 text-xs text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-              <span className="tabular-nums">
-                {completedTasksCount}/{tasksForSelectedDate.length} tasks
-              </span>
-              <span aria-hidden="true">·</span>
-              <span className="tabular-nums">
-                {completedHabitsCount}/{planner.habits.length} habits
-              </span>
-              <span aria-hidden="true">·</span>
-              <button
-                type="button"
-                onClick={() => setShowAllStarredList((v) => !v)}
-                className="inline-flex items-center gap-1 font-medium text-amber-700 hover:underline dark:text-amber-400"
-              >
-                <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
-                <span className="tabular-nums">{allStarredEntries.length} starred</span>
-              </button>
-            </div>
           </div>
 
-          {/* 2. Daily Habit Tracker (Positioned directly below the Calendar) */}
-          <section className="rounded-xl border border-neutral-200/90 bg-white p-4 dark:border-neutral-800 dark:bg-[#20201E]">
+          {/* 2. Daily Habits (Flat, borderless editorial list) */}
+          <section className="px-1">
             <div className="flex items-center justify-between">
               <div className="flex items-baseline gap-2">
                 <h2 className="font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-                  Daily Habits
+                  Habits
                 </h2>
                 <span className="font-mono text-xs tabular-nums text-neutral-400">
                   {completedHabitsCount}/{planner.habits.length}
@@ -1177,10 +1508,10 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowNewHabitInput((prev) => !prev)}
-                className="inline-flex items-center gap-1 text-xs text-neutral-500 transition-colors hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
               >
                 <Plus className="h-3.5 w-3.5" />
-                <span>Add habit</span>
+                <span>Add</span>
               </button>
             </div>
 
@@ -1191,14 +1522,14 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}
                   onSubmit={handleAddHabit}
-                  className="mt-3 flex items-center gap-1.5"
+                  className="mt-2.5 flex items-center gap-1.5"
                 >
                   <input
                     type="text"
                     autoFocus
                     value={newHabitTitle}
                     onChange={(e) => setNewHabitTitle(e.target.value)}
-                    placeholder="New daily habit..."
+                    placeholder="New habit..."
                     className="min-w-0 flex-1 rounded-lg border border-neutral-200 bg-[#F8F8F7] px-2.5 py-1.5 text-xs text-neutral-900 outline-none focus:border-neutral-400 focus:bg-white dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-100"
                   />
                   <button
@@ -1219,10 +1550,10 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               )}
             </AnimatePresence>
 
-            <div className="mt-3 space-y-1.5">
+            <div className="mt-2 space-y-0.5">
               {planner.habits.length === 0 ? (
-                <p className="py-4 text-center text-xs text-neutral-400">
-                  No habits yet. Click &ldquo;Add habit&rdquo; to track daily checkmarks.
+                <p className="py-3 text-xs text-neutral-400">
+                  No habits yet.
                 </p>
               ) : (
                 planner.habits.map((habit) => {
@@ -1247,11 +1578,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                           toggleHabitOnDate(habit.id, selectedDate);
                         }
                       }}
-                      className={`group flex cursor-pointer items-center justify-between gap-2.5 rounded-lg border px-3 py-2 transition-colors ${
-                        isChecked
-                          ? 'border-emerald-200/70 bg-emerald-50/40 dark:border-emerald-900/40 dark:bg-emerald-950/20'
-                          : 'border-neutral-200/80 bg-[#F8F8F7]/60 hover:border-neutral-300 hover:bg-white dark:border-neutral-800 dark:bg-[#191918]/60 dark:hover:border-neutral-700'
-                      }`}
+                      className="group -mx-2 flex cursor-pointer items-center justify-between gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-neutral-100/80 dark:hover:bg-neutral-800/60"
                     >
                       <div className="flex min-w-0 items-center gap-2.5">
                         <span
@@ -1264,7 +1591,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                           {isChecked && <Check className="h-3 w-3 stroke-[2.5]" />}
                         </span>
                         <span
-                          className={`truncate text-xs font-medium ${
+                          className={`truncate text-sm ${
                             isChecked
                               ? 'text-neutral-400 line-through dark:text-neutral-500'
                               : 'text-neutral-800 dark:text-neutral-100'
@@ -1274,9 +1601,9 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-1.5">
+                      <div className="flex shrink-0 items-center gap-1">
                         {streak > 0 && (
-                          <span className="font-mono text-[11px] tabular-nums text-emerald-700 dark:text-emerald-400">
+                          <span className="font-mono text-[11px] tabular-nums text-neutral-400 dark:text-neutral-500">
                             {streak}d
                           </span>
                         )}
@@ -1293,7 +1620,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                           }`}
                           title={
                             isStarredToday
-                              ? 'Starred as important today (click to unstar)'
+                              ? 'Starred today (click to unstar)'
                               : 'Star this habit for today'
                           }
                           aria-label={`Star ${habit.title}`}
@@ -1324,92 +1651,71 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
             </div>
           </section>
 
-          {/* 3. Starred Realizations & Highlights on Selected Day (Compact Card below Habits) */}
-          <section className="rounded-xl border border-neutral-200/90 bg-white p-4 dark:border-neutral-800 dark:bg-[#20201E]">
+          {/* 3. Quick Starred Realization Capture */}
+          <section className="border-t border-neutral-200/80 px-1 pt-5 dark:border-neutral-800">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" />
                 <h2 className="font-display text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-                  Realized / Important
+                  Realized
                 </h2>
               </div>
               <button
                 type="button"
-                onClick={() => setShowAllStarredList(true)}
-                className="text-xs font-medium text-amber-700 hover:underline dark:text-amber-400"
+                onClick={() => setActiveSubPage('starred')}
+                className="inline-flex items-center gap-0.5 text-xs text-neutral-500 transition-colors hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
               >
-                View all ({allStarredEntries.length})
+                <span className="tabular-nums">All ({allStarredEntries.length})</span>
+                <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
 
-            <form onSubmit={handleAddHighlight} className="mt-2.5 flex items-center gap-1.5">
+            <form
+              onSubmit={(e) => handleAddHighlight(e, selectedDate)}
+              className="mt-2.5 flex items-center gap-1.5 rounded-xl border border-neutral-200/90 bg-[#F8F8F7]/80 px-2.5 py-1 transition-colors focus-within:border-amber-400 focus-within:bg-white dark:border-neutral-800 dark:bg-[#20201E]"
+            >
               <input
                 type="text"
                 value={newHighlightText}
                 onChange={(e) => setNewHighlightText(e.target.value)}
-                placeholder="Star a realization or win for today..."
-                className="min-w-0 flex-1 rounded-lg border border-neutral-200 bg-[#F8F8F7] px-2.5 py-1.5 text-xs text-neutral-900 outline-none focus:border-amber-400 focus:bg-white dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-100"
+                placeholder="Star a realization or win..."
+                className="min-w-0 flex-1 bg-transparent py-1 text-xs text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100"
               />
               <button
                 type="submit"
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white hover:bg-amber-600"
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-amber-500 transition-colors hover:bg-amber-50 dark:hover:bg-amber-950/40"
                 title="Star and save"
+                aria-label="Star and save realization"
               >
-                <Star className="h-3.5 w-3.5 fill-white" />
+                <Star className="h-3.5 w-3.5 fill-amber-400" />
               </button>
             </form>
-
-            {selectedDateStarredEntries.length > 0 && (
-              <div className="mt-2.5 space-y-1.5">
-                {selectedDateStarredEntries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className="group flex items-center justify-between gap-2 rounded-lg border border-amber-200/70 bg-amber-50/40 px-2.5 py-1.5 text-xs dark:border-amber-900/40 dark:bg-amber-950/20"
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-500" />
-                      <span className="truncate font-medium text-neutral-800 dark:text-neutral-100">
-                        {entry.title}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleUnstarEntry(entry)}
-                      className="rounded p-0.5 text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100"
-                      title="Unstar"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
           </section>
         </div>
 
-        {/* Right Column: Daily Tasks + Separate Daily Notes & Ideas Sections */}
-        <div className="space-y-8 lg:col-span-8">
+        {/* Right Column: Daily Tasks + Unified Notes & Ideas */}
+        <div className="space-y-9 lg:col-span-8">
           {/* 1. DAILY TASKS */}
-          <section className="space-y-3">
+          <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-baseline gap-2.5">
+              <div className="flex items-baseline gap-2">
                 <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                  Daily Tasks
+                  Tasks
                 </h2>
                 <span className="font-mono text-xs tabular-nums text-neutral-400">
                   {completedTasksCount}/{tasksForSelectedDate.length}
                 </span>
               </div>
 
-              {/* Colored Tag Filter Tabs + Starred Filter + Icon-Only [+] Button */}
-              <div className="flex flex-wrap items-center gap-1.5">
+              {/* Quiet Filter Tabs */}
+              <div className="flex flex-wrap items-center gap-1">
                 <button
                   type="button"
                   onClick={() => setActiveTagFilter('All')}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  className={`rounded-md px-2 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                     activeTagFilter === 'All'
-                      ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-                      : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+                      ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+                      : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
                   }`}
                 >
                   All
@@ -1421,18 +1727,18 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                       curr === '__starred__' ? 'All' : '__starred__'
                     )
                   }
-                  className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                     activeTagFilter === '__starred__'
-                      ? 'bg-amber-500 text-white shadow-xs'
-                      : 'bg-amber-50/80 text-amber-800 hover:bg-amber-100/80 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50'
+                      ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+                      : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
                   }`}
-                  title="Filter to starred important tasks"
+                  title="Filter to starred tasks"
                 >
                   <Star
                     className={`h-3 w-3 ${
                       activeTagFilter === '__starred__'
-                        ? 'fill-white text-white'
-                        : 'fill-amber-400 text-amber-500'
+                        ? 'fill-amber-400 text-amber-500'
+                        : 'text-amber-500/80'
                     }`}
                   />
                   <span>Starred</span>
@@ -1446,15 +1752,13 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                       <button
                         type="button"
                         onClick={() => setActiveTagFilter(tagOption)}
-                        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                          active ? theme.activeFilterClass : theme.inactiveFilterClass
+                        className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                          active
+                            ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+                            : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
                         }`}
                       >
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            active ? 'bg-white' : theme.swatchClass
-                          }`}
-                        />
+                        <span className={`h-1.5 w-1.5 rounded-full ${theme.swatchClass}`} />
                         <span>{tagOption}</span>
                       </button>
                       {isCustom && (
@@ -1474,8 +1778,8 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowCustomTagInput((prev) => !prev)}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-dashed border-neutral-300 text-neutral-500 transition-colors hover:border-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 shrink-0"
-                  title="Add custom tag"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-200 shrink-0"
+                  title="Add tag"
                   aria-label="Add custom tag"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -1483,7 +1787,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               </div>
             </div>
 
-            {/* Custom Tag Creator with Color Swatches */}
+            {/* Custom Tag Creator */}
             <AnimatePresence initial={false}>
               {showCustomTagInput && (
                 <motion.form
@@ -1491,15 +1795,15 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}
                   onSubmit={handleAddCustomTag}
-                  className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-[#F8F8F7] p-2.5 dark:border-neutral-800 dark:bg-[#20201E]"
+                  className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-[#F8F8F7] p-2 dark:border-neutral-800 dark:bg-[#20201E]"
                 >
                   <input
                     type="text"
                     autoFocus
                     value={customTagDraft}
                     onChange={(e) => setCustomTagDraft(e.target.value)}
-                    placeholder="New tag name (e.g. Health, Study, Errands)..."
-                    className="min-w-[180px] flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-900 outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-100"
+                    placeholder="Tag name..."
+                    className="min-w-[160px] flex-1 rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-900 outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-[#191918] dark:text-neutral-100"
                   />
                   <div className="flex items-center gap-1 px-1">
                     {TAG_COLOR_PALETTE.map((c) => (
@@ -1509,7 +1813,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                         onClick={() => setCustomTagColor(c.key)}
                         title={c.label}
                         aria-label={`Select ${c.label} tag color`}
-                        className={`h-5 w-5 rounded-full transition-transform ${
+                        className={`h-4 w-4 rounded-full transition-transform ${
                           c.swatchClass
                         } ${
                           customTagColor === c.key
@@ -1521,9 +1825,9 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                   </div>
                   <button
                     type="submit"
-                    className="rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-blue-600 whitespace-nowrap shrink-0"
+                    className="rounded-lg bg-neutral-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-blue-600 whitespace-nowrap shrink-0"
                   >
-                    Save Tag
+                    Save
                   </button>
                   <button
                     type="button"
@@ -1537,74 +1841,80 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
               )}
             </AnimatePresence>
 
-            {/* Simple Single-Line Task Input with Star Toggle & Colored Tag Selector */}
-            <form onSubmit={handleAddTask} className="flex items-center gap-2">
-              <div className="relative flex flex-1 items-center">
-                <input
-                  type="text"
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  placeholder="Add a task and press Enter..."
-                  className="w-full rounded-lg border border-neutral-200 bg-[#F8F8F7] py-2 pl-3.5 pr-9 text-sm text-neutral-900 outline-none transition-colors focus:border-neutral-400 focus:bg-white dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-100"
-                />
-                <button
-                  type="button"
-                  onClick={() => setNewTaskStarred((s) => !s)}
-                  className="absolute right-2.5 rounded p-1 text-neutral-400 hover:text-amber-500"
-                  title={
-                    newTaskStarred
-                      ? 'Marked as important (★ on calendar)'
-                      : 'Mark as important (★ on calendar)'
-                  }
-                >
-                  <Star
-                    className={`h-4 w-4 ${
-                      newTaskStarred ? 'fill-amber-400 text-amber-500' : ''
-                    }`}
-                  />
-                </button>
-              </div>
-              <select
-                value={newTaskTag}
-                onChange={(e) => {
-                  if (e.target.value === '__custom__') {
-                    setShowCustomTagInput(true);
-                  } else {
-                    setNewTaskTag(e.target.value);
-                  }
-                }}
-                aria-label="Task tag"
-                className={`rounded-lg border px-3 py-2 text-xs font-medium outline-none transition-colors ${selectedNewTaskTheme.badgeClass}`}
+            {/* Unified Single-Bar Task Composer */}
+            <form
+              onSubmit={handleAddTask}
+              className="flex items-center gap-2 rounded-xl border border-neutral-200/90 bg-[#F8F8F7]/80 px-3 py-1.5 transition-colors focus-within:border-neutral-400 focus-within:bg-white dark:border-neutral-800 dark:bg-[#20201E] dark:focus-within:border-neutral-600"
+            >
+              <input
+                type="text"
+                value={newTaskTitle}
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                placeholder="Add a task..."
+                className="min-w-0 flex-1 bg-transparent py-1 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100"
+              />
+              <button
+                type="button"
+                onClick={() => setNewTaskStarred((s) => !s)}
+                className="rounded p-1 text-neutral-400 transition-colors hover:text-amber-500"
+                title={
+                  newTaskStarred
+                    ? 'Starred (appears on calendar)'
+                    : 'Star this task'
+                }
+                aria-label="Toggle star for new task"
               >
-                {allTags.map((t) => (
+                <Star
+                  className={`h-3.5 w-3.5 ${
+                    newTaskStarred ? 'fill-amber-400 text-amber-500' : ''
+                  }`}
+                />
+              </button>
+              <span className="h-4 w-px bg-neutral-200 dark:bg-neutral-700" aria-hidden="true" />
+              <div className="inline-flex items-center gap-1.5">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${selectedNewTaskTheme.swatchClass}`} />
+                <select
+                  value={newTaskTag}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      setShowCustomTagInput(true);
+                    } else {
+                      setNewTaskTag(e.target.value);
+                    }
+                  }}
+                  aria-label="Task tag"
+                  className="cursor-pointer bg-transparent pr-1 text-xs font-medium text-neutral-600 outline-none hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-100"
+                >
+                  {allTags.map((t) => (
+                    <option
+                      key={t}
+                      value={t}
+                      className="bg-white text-neutral-900 dark:bg-[#20201E] dark:text-neutral-100"
+                    >
+                      {t}
+                    </option>
+                  ))}
                   <option
-                    key={t}
-                    value={t}
+                    value="__custom__"
                     className="bg-white text-neutral-900 dark:bg-[#20201E] dark:text-neutral-100"
                   >
-                    {t}
+                    + Custom...
                   </option>
-                ))}
-                <option
-                  value="__custom__"
-                  className="bg-white text-neutral-900 dark:bg-[#20201E] dark:text-neutral-100"
-                >
-                  + Custom...
-                </option>
-              </select>
+                </select>
+              </div>
               <button
                 type="submit"
-                className="rounded-lg bg-neutral-900 px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500 whitespace-nowrap shrink-0"
+                className="rounded-lg bg-neutral-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-blue-600 dark:hover:bg-blue-500 whitespace-nowrap shrink-0"
               >
                 Add
               </button>
             </form>
 
-            {/* Clean Task Rows with Star Button & Colored Tag Selector */}
+            {/* Clean Task Rows */}
             <div className="divide-y divide-neutral-100 dark:divide-neutral-800/70">
               {filteredTasks.length === 0 ? (
-                <p className="py-6 text-center text-xs text-neutral-400">
-                  No tasks for this view yet.
+                <p className="py-8 text-center text-xs text-neutral-400">
+                  No tasks yet.
                 </p>
               ) : (
                 filteredTasks.map((task) => {
@@ -1612,7 +1922,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                   return (
                     <div
                       key={task.id}
-                      className="group flex items-center justify-between gap-3 py-2.5"
+                      className="group -mx-2 flex items-center justify-between gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-neutral-50/90 dark:hover:bg-neutral-800/40"
                     >
                       <div className="flex min-w-0 flex-1 items-center gap-3">
                         <button
@@ -1652,8 +1962,8 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                           }`}
                           title={
                             task.starred
-                              ? 'Important / Starred (appears on calendar)'
-                              : 'Mark as important (★ on calendar)'
+                              ? 'Starred (appears on calendar)'
+                              : 'Star task'
                           }
                           aria-label="Star task"
                         >
@@ -1663,24 +1973,27 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                             }`}
                           />
                         </button>
-                        <select
-                          value={task.tag}
-                          onChange={(e) =>
-                            updateTask(task.id, { tag: e.target.value })
-                          }
-                          aria-label="Change tag"
-                          className={`cursor-pointer rounded-md border px-2 py-0.5 text-xs font-medium outline-none transition-colors ${tagTheme.badgeClass}`}
-                        >
-                          {allTags.map((t) => (
-                            <option
-                              key={t}
-                              value={t}
-                              className="bg-white text-neutral-900 dark:bg-[#20201E] dark:text-neutral-100"
-                            >
-                              {t}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="inline-flex items-center gap-1.5">
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tagTheme.swatchClass}`} />
+                          <select
+                            value={task.tag}
+                            onChange={(e) =>
+                              updateTask(task.id, { tag: e.target.value })
+                            }
+                            aria-label="Change tag"
+                            className="cursor-pointer bg-transparent text-xs text-neutral-500 outline-none hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                          >
+                            {allTags.map((t) => (
+                              <option
+                                key={t}
+                                value={t}
+                                className="bg-white text-neutral-900 dark:bg-[#20201E] dark:text-neutral-100"
+                              >
+                                {t}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         <button
                           type="button"
                           onClick={() => deleteTask(task.id)}
@@ -1697,48 +2010,62 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
             </div>
           </section>
 
-          {/* 2. SEPARATE SECTIONS FOR DAILY NOTES AND IDEAS */}
-          <div className="grid grid-cols-1 gap-6 border-t border-neutral-200/80 pt-8 dark:border-neutral-800 md:grid-cols-2">
-            {/* Daily Notes Section (Empty by default) */}
-            <section className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                  Daily Notes
-                </h2>
-                <span className="text-xs text-neutral-400">
-                  {selectedDate}
-                </span>
+          {/* 2. UNIFIED NOTES & IDEAS WRITING SURFACE */}
+          <section className="space-y-3 border-t border-neutral-200/80 pt-7 dark:border-neutral-800">
+            <div className="flex items-center justify-between">
+              <div className="inline-flex items-center gap-1 rounded-lg bg-neutral-100/80 p-0.5 dark:bg-neutral-800/70">
+                <button
+                  type="button"
+                  onClick={() => setActiveWritingTab('notes')}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                    activeWritingTab === 'notes'
+                      ? 'bg-white text-neutral-900 shadow-2xs dark:bg-[#262624] dark:text-neutral-100'
+                      : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
+                  }`}
+                >
+                  <span>Notes</span>
+                  {activeWritingTab !== 'notes' && notesForSelectedDate.trim().length > 0 && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-neutral-400 dark:bg-neutral-500" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveWritingTab('ideas')}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                    activeWritingTab === 'ideas'
+                      ? 'bg-white text-neutral-900 shadow-2xs dark:bg-[#262624] dark:text-neutral-100'
+                      : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
+                  }`}
+                >
+                  <span>Ideas</span>
+                  {activeWritingTab !== 'ideas' && ideasForSelectedDate.trim().length > 0 && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-neutral-400 dark:bg-neutral-500" />
+                  )}
+                </button>
               </div>
+              <span className="font-mono text-xs tabular-nums text-neutral-400">
+                {selectedDate}
+              </span>
+            </div>
 
+            {activeWritingTab === 'notes' ? (
               <textarea
-                rows={7}
+                rows={8}
                 value={notesForSelectedDate}
                 onChange={(e) => handleNotesChange(e.target.value)}
-                placeholder="Write your daily notes..."
-                className="w-full resize-y rounded-xl border border-neutral-200/90 bg-[#F8F8F7] p-4 text-sm leading-relaxed text-neutral-800 outline-none transition-colors focus:border-neutral-400 focus:bg-white dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-100"
+                placeholder="Write notes for today..."
+                className="w-full resize-y rounded-2xl border border-transparent bg-[#F8F8F7] p-4 text-sm leading-relaxed text-neutral-800 outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-300 focus:bg-white dark:bg-[#20201E] dark:text-neutral-100 dark:focus:border-neutral-700"
               />
-            </section>
-
-            {/* Ideas Section (Empty by default) */}
-            <section className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                  Ideas
-                </h2>
-                <span className="text-xs text-neutral-400">
-                  Scratchpad
-                </span>
-              </div>
-
+            ) : (
               <textarea
-                rows={7}
+                rows={8}
                 value={ideasForSelectedDate}
                 onChange={(e) => handleIdeasChange(e.target.value)}
-                placeholder="Jot down new ideas, sparks, or next steps..."
-                className="w-full resize-y rounded-xl border border-neutral-200/90 bg-[#F8F8F7] p-4 text-sm leading-relaxed text-neutral-800 outline-none transition-colors focus:border-neutral-400 focus:bg-white dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-100"
+                placeholder="Capture rough ideas, sparks, or next steps..."
+                className="w-full resize-y rounded-2xl border border-transparent bg-[#F8F8F7] p-4 text-sm leading-relaxed text-neutral-800 outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-300 focus:bg-white dark:bg-[#20201E] dark:text-neutral-100 dark:focus:border-neutral-700"
               />
-            </section>
-          </div>
+            )}
+          </section>
         </div>
       </div>
     </div>
