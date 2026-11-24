@@ -98,6 +98,136 @@ const GUEST_USER_PROFILE: SidebarUserProfile = {
   photoURL: null,
 };
 
+interface ItemAppearanceOverride {
+  coverUrl?: string | null;
+  icon?: string;
+}
+
+function loadAppearanceMap(uidForStorage?: string): Record<string, ItemAppearanceOverride> {
+  if (!uidForStorage) return {};
+  try {
+    const raw = localStorage.getItem(`folio_item_appearance_v1_${uidForStorage}`);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAppearanceOverride(
+  uidForStorage: string | undefined,
+  itemId: string,
+  patch: ItemAppearanceOverride
+): void {
+  if (!uidForStorage) return;
+  try {
+    const current = loadAppearanceMap(uidForStorage);
+    current[itemId] = { ...(current[itemId] || {}), ...patch };
+    localStorage.setItem(
+      `folio_item_appearance_v1_${uidForStorage}`,
+      JSON.stringify(current)
+    );
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+interface UrlNavState {
+  area: WorkspaceArea;
+  projectId: string | null;
+  groupId: string | null;
+  pageId: string | null;
+  tab: ProjectTabView;
+  peekId: string | null;
+  docId: string | null;
+}
+
+function parseNavFromUrl(): UrlNavState {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const rawView = params.get('view');
+    const areaMap: Record<string, WorkspaceArea> = {
+      home: 'overview',
+      overview: 'overview',
+      project: 'project',
+      folder: 'folder-group',
+      'folder-group': 'folder-group',
+      page: 'standalone-page',
+      'standalone-page': 'standalone-page',
+      daily: 'daily-planner',
+      'daily-planner': 'daily-planner',
+      sync: 'sync-hub',
+      'sync-hub': 'sync-hub',
+      drive: 'drive-browser',
+      'drive-browser': 'drive-browser',
+    };
+    const area: WorkspaceArea = (rawView && areaMap[rawView]) || 'overview';
+    const rawTab = params.get('tab');
+    const validTabs: ProjectTabView[] = ['page', 'docs', 'board', 'table', 'list', 'files'];
+    const tab: ProjectTabView =
+      rawTab && validTabs.includes(rawTab as ProjectTabView)
+        ? (rawTab as ProjectTabView)
+        : 'page';
+    const id = params.get('id');
+    return {
+      area,
+      projectId: area === 'project' ? id : null,
+      groupId: area === 'folder-group' ? id : null,
+      pageId: area === 'standalone-page' ? id : null,
+      tab,
+      peekId: params.get('peek'),
+      docId: area === 'project' && tab === 'docs' ? params.get('doc') : null,
+    };
+  } catch {
+    return {
+      area: 'overview',
+      projectId: null,
+      groupId: null,
+      pageId: null,
+      tab: 'page',
+      peekId: null,
+      docId: null,
+    };
+  }
+}
+
+function buildUrlFromNav(nav: UrlNavState): string {
+  const params = new URLSearchParams();
+  const areaSlug: Record<WorkspaceArea, string> = {
+    overview: 'home',
+    project: 'project',
+    'folder-group': 'folder',
+    'standalone-page': 'page',
+    'daily-planner': 'daily',
+    'sync-hub': 'sync',
+    'drive-browser': 'drive',
+  };
+  params.set('view', areaSlug[nav.area]);
+  if (nav.area === 'project' && nav.projectId) {
+    params.set('id', nav.projectId);
+    params.set('tab', nav.tab);
+    if (nav.tab === 'docs' && nav.docId) {
+      params.set('doc', nav.docId);
+    }
+  } else if (nav.area === 'folder-group' && nav.groupId) {
+    params.set('id', nav.groupId);
+  } else if (nav.area === 'standalone-page' && nav.pageId) {
+    params.set('id', nav.pageId);
+  }
+  if (nav.peekId) {
+    params.set('peek', nav.peekId);
+  }
+  if (nav.area === 'daily-planner') {
+    const existingSub = new URLSearchParams(window.location.search).get('sub');
+    if (existingSub === 'starred') {
+      params.set('sub', 'starred');
+    }
+  }
+  const qs = params.toString();
+  return `${window.location.pathname}${qs ? `?${qs}` : ''}`;
+}
+
 export default function App() {
   const [user, setUser] = useState<User | SidebarUserProfile | null>(null);
   const [isGuestMode, setIsGuestMode] = useState<boolean>(false);
@@ -142,14 +272,17 @@ export default function App() {
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
-  const [activeArea, setActiveArea] = useState<WorkspaceArea>('overview');
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-  const [activeStandalonePageId, setActiveStandalonePageId] = useState<string | null>(null);
-  const [sidePeekPageId, setSidePeekPageId] = useState<string | null>(null);
+  const initialNav = useMemo(() => parseNavFromUrl(), []);
+  const [activeArea, setActiveArea] = useState<WorkspaceArea>(initialNav.area);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(initialNav.projectId);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(initialNav.groupId);
+  const [activeStandalonePageId, setActiveStandalonePageId] = useState<string | null>(
+    initialNav.pageId
+  );
+  const [sidePeekPageId, setSidePeekPageId] = useState<string | null>(initialNav.peekId);
   const [pendingProjectGroupId, setPendingProjectGroupId] = useState<string | null>(null);
   const [openOverviewMenuId, setOpenOverviewMenuId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ProjectTabView>('page');
+  const [activeTab, setActiveTab] = useState<ProjectTabView>(initialNav.tab);
   const [isPullingId, setIsPullingId] = useState<string | null>(null);
 
   const [commandOpen, setCommandOpen] = useState(false);
@@ -173,10 +306,14 @@ export default function App() {
   const [syncingExtraDocIds, setSyncingExtraDocIds] = useState<Record<string, boolean>>({});
   const [pullingStandaloneIds, setPullingStandaloneIds] = useState<Record<string, boolean>>({});
   const [syncingStandaloneIds, setSyncingStandaloneIds] = useState<Record<string, boolean>>({});
-  const [selectedExtraDocId, setSelectedExtraDocId] = useState<string | null>(null);
+  const [selectedExtraDocId, setSelectedExtraDocId] = useState<string | null>(
+    initialNav.docId
+  );
   const [requestedTaskId, setRequestedTaskId] = useState<string | null>(null);
   const projectsRef = useRef<ProjectWorkspace[]>([]);
   const syncingRef = useRef<Record<string, boolean>>({});
+  const hasMountedUrlSyncRef = useRef(false);
+  const isApplyingPopStateRef = useRef(false);
 
   const hasProjectDirty = useCallback(
     (p: ProjectWorkspace) =>
@@ -211,6 +348,73 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
+  }, []);
+
+  // Sync URL with every view, project, tab, folder, page, and side-peek transition
+  useEffect(() => {
+    if (isAuthChecking || needsAuth || !user) return;
+    if (isApplyingPopStateRef.current) {
+      isApplyingPopStateRef.current = false;
+      return;
+    }
+    const nextUrl = buildUrlFromNav({
+      area: activeArea,
+      projectId: activeProjectId,
+      groupId: activeGroupId,
+      pageId: activeStandalonePageId,
+      tab: activeTab,
+      peekId: sidePeekPageId,
+      docId: selectedExtraDocId,
+    });
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (!hasMountedUrlSyncRef.current) {
+      hasMountedUrlSyncRef.current = true;
+      if (nextUrl !== currentUrl) {
+        window.history.replaceState(null, '', nextUrl);
+      }
+      return;
+    }
+    if (nextUrl !== currentUrl) {
+      window.history.pushState(null, '', nextUrl);
+    }
+  }, [
+    isAuthChecking,
+    needsAuth,
+    user,
+    activeArea,
+    activeProjectId,
+    activeGroupId,
+    activeStandalonePageId,
+    activeTab,
+    sidePeekPageId,
+    selectedExtraDocId,
+  ]);
+
+  // Handle browser Back / Forward buttons cleanly within the app
+  useEffect(() => {
+    const handlePopState = () => {
+      const nav = parseNavFromUrl();
+      isApplyingPopStateRef.current = true;
+      setActiveArea(nav.area);
+      if (nav.projectId) {
+        setActiveProjectId(nav.projectId);
+      }
+      if (nav.groupId) {
+        setActiveGroupId(nav.groupId);
+      }
+      if (nav.pageId) {
+        setActiveStandalonePageId(nav.pageId);
+      }
+      setActiveTab(nav.tab);
+      setSidePeekPageId(nav.peekId);
+      setSelectedExtraDocId(nav.docId);
+      // Fallback reset in case only a child sub-param (e.g. ?sub=starred) changed and App state stayed identical
+      window.setTimeout(() => {
+        isApplyingPopStateRef.current = false;
+      }, 0);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const showToast = useCallback((msg: string) => {
@@ -348,14 +552,32 @@ export default function App() {
           discoverStandaloneWorkspacePages(accessToken, root.id),
         ]);
 
+        const savedAppearance = loadAppearanceMap(uidForStorage);
+
         const visibleProjects = discoveredProjects
           .filter((p) => !savedRemoved[p.id])
-          .map((p) => ({
-            ...p,
-            groupId: savedGroupMap[p.id] || p.groupId || null,
-          }));
+          .map((p) => {
+            const override = savedAppearance[p.id];
+            return {
+              ...p,
+              groupId: savedGroupMap[p.id] || p.groupId || null,
+              icon: override?.icon !== undefined ? override.icon : p.icon,
+              coverUrl:
+                override && 'coverUrl' in override ? override.coverUrl ?? null : p.coverUrl,
+            };
+          });
 
-        const visiblePages = discoveredPages.filter((pg) => !savedRemoved[pg.id]);
+        const visiblePages = discoveredPages
+          .filter((pg) => !savedRemoved[pg.id])
+          .map((pg) => {
+            const override = savedAppearance[pg.id];
+            return {
+              ...pg,
+              icon: override?.icon !== undefined ? override.icon : pg.icon,
+              coverUrl:
+                override && 'coverUrl' in override ? override.coverUrl ?? null : pg.coverUrl,
+            };
+          });
 
         setProjects(visibleProjects);
         setStandalonePages(visiblePages);
@@ -652,6 +874,10 @@ export default function App() {
       coverUrl: customCoverUrl || created.coverUrl,
       groupId: assignedGroupId || null,
     };
+    saveAppearanceOverride(user?.uid, created.id, {
+      icon: withGroup.icon,
+      coverUrl: withGroup.coverUrl,
+    });
     if (assignedGroupId) {
       saveProjectGroupMap({
         ...projectGroupMap,
@@ -4097,20 +4323,22 @@ export default function App() {
                     )
                   )
                 }
-                onIconChange={(icon) =>
+                onIconChange={(icon) => {
+                  saveAppearanceOverride(user?.uid, activeStandalonePage.id, { icon });
                   setStandalonePages((prev) =>
                     prev.map((pg) =>
                       pg.id === activeStandalonePage.id ? { ...pg, icon } : pg
                     )
-                  )
-                }
-                onCoverChange={(coverUrl) =>
+                  );
+                }}
+                onCoverChange={(coverUrl) => {
+                  saveAppearanceOverride(user?.uid, activeStandalonePage.id, { coverUrl });
                   setStandalonePages((prev) =>
                     prev.map((pg) =>
                       pg.id === activeStandalonePage.id ? { ...pg, coverUrl } : pg
                     )
-                  )
-                }
+                  );
+                }}
                 onBlocksChange={(blocks) =>
                   setStandalonePages((prev) =>
                     prev.map((pg) =>
@@ -4245,12 +4473,14 @@ export default function App() {
                     dirtyDoc: true,
                   }))
                 }
-                onIconChange={(icon) =>
-                  updateLocalProject(activeProject.id, (p) => ({ ...p, icon }))
-                }
-                onCoverChange={(coverUrl) =>
-                  updateLocalProject(activeProject.id, (p) => ({ ...p, coverUrl }))
-                }
+                onIconChange={(icon) => {
+                  saveAppearanceOverride(user?.uid, activeProject.id, { icon });
+                  updateLocalProject(activeProject.id, (p) => ({ ...p, icon }));
+                }}
+                onCoverChange={(coverUrl) => {
+                  saveAppearanceOverride(user?.uid, activeProject.id, { coverUrl });
+                  updateLocalProject(activeProject.id, (p) => ({ ...p, coverUrl }));
+                }}
                 onBlocksChange={(blocks: DocBlock[]) =>
                   updateLocalProject(activeProject.id, (p) => ({
                     ...p,
@@ -4460,20 +4690,22 @@ export default function App() {
                     )
                   )
                 }
-                onIconChange={(icon) =>
+                onIconChange={(icon) => {
+                  saveAppearanceOverride(user?.uid, sidePeekStandalonePage.id, { icon });
                   setStandalonePages((prev) =>
                     prev.map((pg) =>
                       pg.id === sidePeekStandalonePage.id ? { ...pg, icon } : pg
                     )
-                  )
-                }
-                onCoverChange={(coverUrl) =>
+                  );
+                }}
+                onCoverChange={(coverUrl) => {
+                  saveAppearanceOverride(user?.uid, sidePeekStandalonePage.id, { coverUrl });
                   setStandalonePages((prev) =>
                     prev.map((pg) =>
                       pg.id === sidePeekStandalonePage.id ? { ...pg, coverUrl } : pg
                     )
-                  )
-                }
+                  );
+                }}
                 onBlocksChange={(blocks) =>
                   setStandalonePages((prev) =>
                     prev.map((pg) =>

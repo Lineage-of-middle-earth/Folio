@@ -252,10 +252,10 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
   return (
     <div className="space-y-4">
       {/* Database Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 pb-3 dark:border-neutral-800">
+      <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex flex-wrap items-center gap-2">
-          {/* Segmented View Switcher */}
-          <div className="flex items-center gap-0.5 rounded-lg bg-neutral-100 p-1 dark:bg-neutral-800/80">
+          {/* View Mode Switcher */}
+          <div className="flex items-center gap-0.5 rounded-lg bg-neutral-100/90 p-0.5 dark:bg-neutral-800/80">
             {(
               [
                 { id: 'board', label: 'Board', icon: <Kanban className="h-3.5 w-3.5" /> },
@@ -270,14 +270,14 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                 className={`relative inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                   viewMode === mode.id
                     ? 'text-neutral-900 dark:text-neutral-100'
-                    : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200'
+                    : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200'
                 }`}
               >
                 {viewMode === mode.id && (
                   <motion.span
                     layoutId={`taskdb-view-${switcherId}`}
                     transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                    className="absolute inset-0 rounded-md bg-white shadow-xs dark:bg-[#191918]"
+                    className="absolute inset-0 rounded-md bg-white shadow-2xs dark:bg-[#191918]"
                   />
                 )}
                 <span className="relative z-10 inline-flex items-center gap-1.5">
@@ -296,7 +296,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Filter tasks..."
-              className="w-44 rounded-lg border border-neutral-200 bg-white py-1.5 pl-8 pr-2.5 text-xs text-neutral-800 outline-none transition-colors focus:border-neutral-400 dark:border-neutral-800 dark:bg-[#191918] dark:text-neutral-200 dark:focus:border-neutral-600"
+              className="w-40 rounded-lg border border-neutral-200/90 bg-white py-1.5 pl-8 pr-2.5 text-xs text-neutral-800 outline-none transition-colors focus:border-neutral-400 dark:border-neutral-800 dark:bg-[#191918] dark:text-neutral-200 dark:focus:border-neutral-600"
             />
           </div>
 
@@ -307,7 +307,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
               setPriorityFilter(e.target.value as 'All' | TaskPriority)
             }
             aria-label="Filter by priority"
-            className="rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs text-neutral-700 outline-none focus:border-neutral-400 dark:border-neutral-800 dark:bg-[#191918] dark:text-neutral-300"
+            className="rounded-lg border border-neutral-200/90 bg-white px-2.5 py-1.5 text-xs text-neutral-600 outline-none focus:border-neutral-400 dark:border-neutral-800 dark:bg-[#191918] dark:text-neutral-300"
           >
             <option value="All">All priorities</option>
             {PRIORITIES.map((p) => (
@@ -318,17 +318,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
           </select>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {sheetTitle && sheetUrl && (
-            <a
-              href={sheetUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-neutral-500 underline-offset-4 hover:text-neutral-900 hover:underline dark:text-neutral-400 dark:hover:text-neutral-100 whitespace-nowrap shrink-0"
-            >
-              Sheet: {sheetTitle}
-            </a>
-          )}
+        <div className="flex flex-wrap items-center gap-2">
           {unlinkedDocsCount > 0 && (
             <button
               type="button"

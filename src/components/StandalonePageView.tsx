@@ -20,6 +20,7 @@ import {
 import { DocBlock, StandalonePage } from '../types/workspace';
 import { COVER_PRESETS } from '../lib/coverAssets';
 import { BlockEditor } from './BlockEditor';
+import { CoverPickerModal } from './CoverPickerModal';
 
 interface StandalonePageViewProps {
   page: StandalonePage;
@@ -131,11 +132,11 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
               referrerPolicy="no-referrer"
               className="h-full w-full object-cover"
             />
-            <div className="absolute bottom-3 right-6 flex items-center gap-1.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+            <div className="absolute bottom-3 right-6 z-20 flex items-center gap-1.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
               <button
                 type="button"
-                onClick={() => setShowCoverPicker((prev) => !prev)}
-                className="rounded-md border border-neutral-200/80 bg-white/90 px-2.5 py-1 text-xs font-medium text-neutral-800 shadow-xs backdrop-blur-xs hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-200"
+                onClick={() => setShowCoverPicker(true)}
+                className="rounded-md border border-neutral-200/80 bg-white/95 px-2.5 py-1 text-xs font-medium text-neutral-800 shadow-xs backdrop-blur-xs hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-200"
               >
                 Change cover
               </button>
@@ -145,7 +146,7 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
                   setShowCoverPicker(false);
                   onCoverChange(null);
                 }}
-                className="rounded-md border border-neutral-200/80 bg-white/90 px-2.5 py-1 text-xs font-medium text-neutral-800 shadow-xs backdrop-blur-xs hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-200"
+                className="rounded-md border border-neutral-200/80 bg-white/95 px-2.5 py-1 text-xs font-medium text-neutral-800 shadow-xs backdrop-blur-xs hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-200"
               >
                 Hide
               </button>
@@ -161,7 +162,7 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
           >
             <button
               type="button"
-              onClick={() => onCoverChange(COVER_PRESETS[0].url)}
+              onClick={() => setShowCoverPicker(true)}
               className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
             >
               <ImageIcon className="h-3.5 w-3.5" />
@@ -171,38 +172,12 @@ export const StandalonePageView: React.FC<StandalonePageViewProps> = ({
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showCoverPicker && (
-          <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.98 }}
-            className={`${containerClass} pt-3`}
-          >
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white p-2.5 dark:border-neutral-800 dark:bg-[#20201E]">
-              {COVER_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => {
-                    onCoverChange(preset.url);
-                    setShowCoverPicker(false);
-                  }}
-                  className="flex items-center gap-2 rounded-lg border border-neutral-200 p-1 pr-2.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-                >
-                  <img
-                    src={preset.url}
-                    alt={preset.label}
-                    referrerPolicy="no-referrer"
-                    className="h-7 w-11 rounded object-cover"
-                  />
-                  <span>{preset.label}</span>
-                </button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <CoverPickerModal
+        isOpen={showCoverPicker}
+        currentCoverUrl={page.coverUrl}
+        onSelectCover={(url) => onCoverChange(url)}
+        onClose={() => setShowCoverPicker(false)}
+      />
 
       {/* Main Page Container */}
       <div className={containerClass}>

@@ -355,9 +355,39 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
 
   const [newHighlightText, setNewHighlightText] = useState('');
   const [newHighlightDate, setNewHighlightDate] = useState<string>(todayKey);
-  const [activeSubPage, setActiveSubPage] = useState<'planner' | 'starred'>('planner');
+  const [activeSubPage, setActiveSubPage] = useState<'planner' | 'starred'>(() => {
+    try {
+      const sub = new URLSearchParams(window.location.search).get('sub');
+      return sub === 'starred' ? 'starred' : 'planner';
+    } catch {
+      return 'planner';
+    }
+  });
   const [activeWritingTab, setActiveWritingTab] = useState<'notes' | 'ideas'>('notes');
   const [starredSearchQuery, setStarredSearchQuery] = useState('');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const currentSub = params.get('sub');
+    if (activeSubPage === 'starred' && currentSub !== 'starred') {
+      params.set('view', 'daily');
+      params.set('sub', 'starred');
+      window.history.pushState(null, '', `${window.location.pathname}?${params.toString()}`);
+    } else if (activeSubPage === 'planner' && currentSub === 'starred') {
+      params.delete('sub');
+      const qs = params.toString();
+      window.history.pushState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+    }
+  }, [activeSubPage]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const sub = new URLSearchParams(window.location.search).get('sub');
+      setActiveSubPage(sub === 'starred' ? 'starred' : 'planner');
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
   const [starredKindFilter, setStarredKindFilter] = useState<
     'all' | 'realization' | 'task' | 'habit'
   >('all');

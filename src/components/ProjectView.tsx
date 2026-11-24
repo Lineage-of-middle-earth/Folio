@@ -13,12 +13,10 @@ import {
   FolderMinus,
   FolderOpen,
   Image as ImageIcon,
-  Kanban,
   Link2,
   ListChecks,
   MoreHorizontal,
   RefreshCw,
-  Table2,
   Trash2,
 } from 'lucide-react';
 import {
@@ -32,6 +30,7 @@ import {
 } from '../types/workspace';
 import { COVER_PRESETS } from '../lib/coverAssets';
 import { BlockEditor } from './BlockEditor';
+import { CoverPickerModal } from './CoverPickerModal';
 import { DocumentsHub } from './DocumentsHub';
 import { TaskDatabase } from './TaskDatabase';
 import { DriveFilesPanel } from './DriveFilesPanel';
@@ -154,6 +153,15 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const [showCoverPicker, setShowCoverPicker] = useState(false);
   const [openCreatorSignal, setOpenCreatorSignal] = useState(0);
   const [showProjectMenu, setShowProjectMenu] = useState(false);
+  const [lastTaskViewMode, setLastTaskViewMode] = useState<'board' | 'table' | 'list'>('board');
+  const [inlineTaskViewMode, setInlineTaskViewMode] = useState<'board' | 'table' | 'list'>('board');
+
+  const isTasksTab =
+    activeTab === 'board' || activeTab === 'table' || activeTab === 'list';
+
+  const activeTopTab: 'page' | 'docs' | 'tasks' | 'files' = isTasksTab
+    ? 'tasks'
+    : activeTab;
 
   const hasPendingChanges =
     project.dirtyDoc ||
@@ -161,10 +169,6 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     project.tasks.some((t) => Boolean(t.dirtyTaskDoc)) ||
     project.extraDocs.some((d) => Boolean(d.dirty));
   const doneCount = project.tasks.filter((t) => t.status === 'Done').length;
-
-  const cycleCover = () => {
-    setShowCoverPicker((prev) => !prev);
-  };
 
   return (
     <div className="min-h-full pb-20">
@@ -190,12 +194,12 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
             referrerPolicy="no-referrer"
             className="h-full w-full object-cover"
           />
-          <div className="absolute bottom-3 right-6 flex items-center gap-1.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          <div className="absolute bottom-3 right-6 z-20 flex items-center gap-1.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
             <motion.button
               type="button"
               whileTap={{ scale: 0.96 }}
-              onClick={cycleCover}
-              className="rounded-md border border-neutral-200/80 bg-white/90 px-2.5 py-1 text-xs font-medium text-neutral-800 shadow-xs backdrop-blur-xs hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-200"
+              onClick={() => setShowCoverPicker(true)}
+              className="rounded-md border border-neutral-200/80 bg-white/95 px-2.5 py-1 text-xs font-medium text-neutral-800 shadow-xs backdrop-blur-xs hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-200"
             >
               Change cover
             </motion.button>
@@ -206,7 +210,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 setShowCoverPicker(false);
                 onCoverChange(null);
               }}
-              className="rounded-md border border-neutral-200/80 bg-white/90 px-2.5 py-1 text-xs font-medium text-neutral-800 shadow-xs backdrop-blur-xs hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-200"
+              className="rounded-md border border-neutral-200/80 bg-white/95 px-2.5 py-1 text-xs font-medium text-neutral-800 shadow-xs backdrop-blur-xs hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-200"
             >
               Hide
             </motion.button>
@@ -227,7 +231,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           <motion.button
             type="button"
             whileTap={{ scale: 0.96 }}
-            onClick={() => onCoverChange(COVER_PRESETS[0].url)}
+            onClick={() => setShowCoverPicker(true)}
             className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             <ImageIcon className="h-3.5 w-3.5" />
@@ -237,45 +241,12 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       )}
       </AnimatePresence>
 
-      <AnimatePresence>
-      {showCoverPicker && (
-        <motion.div
-          initial={{ opacity: 0, y: -6, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -6, scale: 0.98 }}
-          transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-          className={
-            fullWidth
-              ? 'w-full max-w-none px-4 pt-3 sm:px-6'
-              : 'mx-auto max-w-[960px] px-6 pt-3 lg:px-10'
-          }
-        >
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white p-2.5 dark:border-neutral-800 dark:bg-[#20201E]">
-            {COVER_PRESETS.map((preset) => (
-              <motion.button
-                key={preset.id}
-                type="button"
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={() => {
-                  onCoverChange(preset.url);
-                  setShowCoverPicker(false);
-                }}
-                className="flex items-center gap-2 rounded-lg border border-neutral-200 p-1 pr-2.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-              >
-                <img
-                  src={preset.url}
-                  alt={preset.label}
-                  referrerPolicy="no-referrer"
-                  className="h-7 w-11 rounded object-cover"
-                />
-                <span>{preset.label}</span>
-              </motion.button>
-            ))}
-          </div>
-        </motion.div>
-      )}
-      </AnimatePresence>
+      <CoverPickerModal
+        isOpen={showCoverPicker}
+        currentCoverUrl={project.coverUrl}
+        onSelectCover={(url) => onCoverChange(url)}
+        onClose={() => setShowCoverPicker(false)}
+      />
 
       {/* Main Page Container */}
       <div
@@ -409,23 +380,27 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
               [
                 { id: 'page', label: 'Brief', icon: <FileText className="h-3.5 w-3.5" /> },
                 { id: 'docs', label: 'Docs', icon: <Files className="h-3.5 w-3.5" /> },
-                { id: 'board', label: 'Board', icon: <Kanban className="h-3.5 w-3.5" /> },
-                { id: 'table', label: 'Table', icon: <Table2 className="h-3.5 w-3.5" /> },
-                { id: 'list', label: 'List', icon: <ListChecks className="h-3.5 w-3.5" /> },
+                { id: 'tasks', label: 'Tasks', icon: <ListChecks className="h-3.5 w-3.5" /> },
                 { id: 'files', label: 'Files', icon: <FolderOpen className="h-3.5 w-3.5" /> },
               ] as const
             ).map((tab) => (
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => onTabChange(tab.id)}
-                className={`relative inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                  activeTab === tab.id
+                onClick={() => {
+                  if (tab.id === 'tasks') {
+                    onTabChange(lastTaskViewMode);
+                  } else {
+                    onTabChange(tab.id);
+                  }
+                }}
+                className={`relative inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  activeTopTab === tab.id
                     ? 'text-neutral-900 dark:text-neutral-100'
                     : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
                 }`}
               >
-                {activeTab === tab.id && (
+                {activeTopTab === tab.id && (
                   <motion.span
                     layoutId={`project-tab-pill-${project.id}`}
                     transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
@@ -708,8 +683,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 </div>
                 <TaskDatabase
                   tasks={project.tasks}
-                  viewMode="board"
-                  onViewModeChange={(mode) => onTabChange(mode)}
+                  viewMode={inlineTaskViewMode}
+                  onViewModeChange={(mode) => setInlineTaskViewMode(mode)}
                   onTasksChange={onTasksChange}
                   onTaskDocBlocksChange={onTaskDocBlocksChange}
                   onCreateTaskDoc={onCreateTaskDoc}
@@ -785,7 +760,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
             activeTab === 'table' ||
             activeTab === 'list') && (
             <motion.div
-              key={`tab-db-${activeTab}`}
+              key="tab-db"
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
@@ -794,7 +769,10 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
               <TaskDatabase
                 tasks={project.tasks}
                 viewMode={activeTab}
-                onViewModeChange={(mode) => onTabChange(mode)}
+                onViewModeChange={(mode) => {
+                  setLastTaskViewMode(mode);
+                  onTabChange(mode);
+                }}
                 onTasksChange={onTasksChange}
                 onTaskDocBlocksChange={onTaskDocBlocksChange}
                 onCreateTaskDoc={onCreateTaskDoc}
