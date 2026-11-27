@@ -103,6 +103,7 @@ export interface DailyTaskItem {
   tag: string; // 'Work' | 'Personal' | custom tag
   time?: string;
   createdAt: string;
+  rolledOverFrom?: string; // Original YYYY-MM-DD when rolled over from a past day
 }
 
 export interface DailyHabitItem {

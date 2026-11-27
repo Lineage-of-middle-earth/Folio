@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  ArrowRight,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -18,6 +19,12 @@ import {
   DailyTaskItem,
 } from '../types/workspace';
 import { uid } from '../lib/googleWorkspaceApi';
+import {
+  getNextDateKey,
+  moveSingleTaskToNextDay,
+  moveUncompletedTasksToNextDay,
+  rolloverPastUncompletedDailyTasks,
+} from '../lib/dailyRollover';
 
 interface DailyPlannerViewProps {
   userId: string;
@@ -298,7 +305,7 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
   fullWidth = false,
   onToggleFullWidth,
 }) => {
-  const todayKey = useMemo(() => toDateKey(new Date()), []);
+  const [todayKey, setTodayKey] = useState<string>(() => toDateKey(new Date()));
   const storageKey = `folio_daily_planner_v1_${userId || 'local'}`;
 
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
@@ -313,8 +320,13 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
       if (raw) {
         const parsed = JSON.parse(raw) as DailyPlannerState;
         if (parsed && typeof parsed === 'object' && parsed.tasksByDate && parsed.habits) {
+          const cleanedTasks = sanitizeLegacyTasks(parsed.tasksByDate);
+          const { tasksByDate: rolledTasks } = rolloverPastUncompletedDailyTasks(
+            cleanedTasks,
+            toDateKey(new Date())
+          );
           return {
-            tasksByDate: sanitizeLegacyTasks(parsed.tasksByDate),
+            tasksByDate: rolledTasks,
             notesByDate: sanitizeLegacyNotes(parsed.notesByDate),
             ideasByDate: parsed.ideasByDate || {},
             highlightsByDate: parsed.highlightsByDate || {},
@@ -332,6 +344,28 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
     }
     return createInitialPlannerState();
   });
+
+  // Check for midnight rollover while the app is open, and roll over any uncompleted past tasks when viewing today
+  useEffect(() => {
+    const checkDayRollover = () => {
+      const currentToday = toDateKey(new Date());
+      if (currentToday !== todayKey) {
+        setTodayKey(currentToday);
+      }
+      setPlanner((prev) => {
+        const { tasksByDate: rolled, rolledCount } =
+          rolloverPastUncompletedDailyTasks(prev.tasksByDate, currentToday);
+        return rolledCount > 0 ? { ...prev, tasksByDate: rolled } : prev;
+      });
+    };
+
+    if (selectedDate === todayKey) {
+      checkDayRollover();
+    }
+
+    const timer = window.setInterval(checkDayRollover, 60_000);
+    return () => window.clearInterval(timer);
+  }, [todayKey, selectedDate]);
 
   useEffect(() => {
     try {
@@ -701,6 +735,27 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
         ),
       },
     }));
+  };
+
+  const moveTaskToNextDay = (taskId: string, dateKey = selectedDate) => {
+    setPlanner((prev) => {
+      const { tasksByDate: nextMap, moved } = moveSingleTaskToNextDay(
+        prev.tasksByDate,
+        dateKey,
+        taskId
+      );
+      return moved ? { ...prev, tasksByDate: nextMap } : prev;
+    });
+  };
+
+  const moveAllUncompletedToNextDay = (dateKey = selectedDate) => {
+    setPlanner((prev) => {
+      const { tasksByDate: nextMap, movedCount } = moveUncompletedTasksToNextDay(
+        prev.tasksByDate,
+        dateKey
+      );
+      return movedCount > 0 ? { ...prev, tasksByDate: nextMap } : prev;
+    });
   };
 
   const handleAddCustomTag = (e: React.FormEvent) => {
@@ -1728,13 +1783,26 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
           {/* 1. DAILY TASKS */}
           <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-baseline gap-2">
-                <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                  Tasks
-                </h2>
-                <span className="font-mono text-xs tabular-nums text-neutral-400">
-                  {completedTasksCount}/{tasksForSelectedDate.length}
-                </span>
+              <div className="flex items-center gap-3">
+                <div className="flex items-baseline gap-2">
+                  <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
+                    Tasks
+                  </h2>
+                  <span className="font-mono text-xs tabular-nums text-neutral-400">
+                    {completedTasksCount}/{tasksForSelectedDate.length}
+                  </span>
+                </div>
+                {tasksForSelectedDate.some((t) => !t.completed) && (
+                  <button
+                    type="button"
+                    onClick={() => moveAllUncompletedToNextDay(selectedDate)}
+                    className="inline-flex items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-0.5 text-[11px] font-medium text-neutral-600 transition-colors hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:bg-[#20201E] dark:text-neutral-300 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0"
+                    title={`Move all uncompleted tasks to ${getNextDateKey(selectedDate)}`}
+                  >
+                    <span>Move uncompleted to next day</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </button>
+                )}
               </div>
 
               {/* Quiet Filter Tabs */}
@@ -1979,9 +2047,28 @@ export const DailyPlannerView: React.FC<DailyPlannerViewProps> = ({
                               : 'text-neutral-800 dark:text-neutral-100'
                           }`}
                         />
+                        {task.rolledOverFrom && task.rolledOverFrom !== selectedDate && (
+                          <span
+                            className="shrink-0 font-mono text-[11px] tabular-nums text-amber-600 dark:text-amber-400"
+                            title={`Automatically carried forward from ${task.rolledOverFrom}`}
+                          >
+                            From {task.rolledOverFrom}
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex shrink-0 items-center gap-2">
+                        {!task.completed && (
+                          <button
+                            type="button"
+                            onClick={() => moveTaskToNextDay(task.id)}
+                            className="rounded p-1 text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-neutral-800 group-hover:opacity-100 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                            title={`Move to next day (${getNextDateKey(selectedDate)})`}
+                            aria-label="Move task to next day"
+                          >
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => toggleTaskStarred(task.id)}

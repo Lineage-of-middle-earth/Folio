@@ -33,6 +33,14 @@ import {
   TaskStatus,
 } from '../types/workspace';
 import { buildTaskDocStarterBlocks, uid } from '../lib/googleWorkspaceApi';
+import {
+  TASK_TAG_COLOR_PALETTE,
+  TaskTagColorKey,
+  getTaskTagColorTheme,
+  loadCustomTagColors,
+  parseTaskTags,
+  saveCustomTagColor,
+} from '../lib/tagColors';
 import { BlockEditor } from './BlockEditor';
 
 interface TaskDatabaseProps {
@@ -124,11 +132,25 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'All' | TaskPriority>('All');
+  const [tagFilter, setTagFilter] = useState<string>('All');
+  const [customTagColors, setCustomTagColors] = useState<Record<string, TaskTagColorKey>>(
+    () => loadCustomTagColors()
+  );
+  const [editingColorForTag, setEditingColorForTag] = useState<string | null>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [taskViewMode, setTaskViewMode] = useState<'side' | 'fullscreen'>('side');
   const [showNewDocForTaskId, setShowNewDocForTaskId] = useState<string | null>(null);
+
+  // Sync custom tag colors across components
+  useEffect(() => {
+    const onTagColorsUpdated = () => {
+      setCustomTagColors(loadCustomTagColors());
+    };
+    window.addEventListener('folio-tag-colors-updated', onTagColorsUpdated);
+    return () => window.removeEventListener('folio-tag-colors-updated', onTagColorsUpdated);
+  }, []);
 
   // Per-task local draft state before a Google Doc is created
   const [draftTitleMap, setDraftTitleMap] = useState<Record<string, string>>({});
@@ -139,7 +161,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
 
   const switcherId = useId();
 
-  // Open task automatically if navigated from DocumentsHub or CommandPalette
+  // Open task automatically if navigated from DocumentsHub, Home Dashboard, or CommandPalette
   useEffect(() => {
     if (requestedTaskId && tasks.some((t) => t.id === requestedTaskId)) {
       setSelectedTaskId(requestedTaskId);
@@ -147,12 +169,29 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
     }
   }, [requestedTaskId, tasks, onClearRequestedTaskId]);
 
+  const allTags = useMemo(() => {
+    const seen = new Map<string, string>();
+    tasks.forEach((task) => {
+      parseTaskTags(task.tags).forEach((t) => {
+        const key = t.toLowerCase();
+        if (!seen.has(key)) {
+          seen.set(key, t);
+        }
+      });
+    });
+    return Array.from(seen.values());
+  }, [tasks]);
+
   const filteredTasks = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return tasks.filter((task) => {
       const matchesPriority =
         priorityFilter === 'All' || task.priority === priorityFilter;
       if (!matchesPriority) return false;
+      if (tagFilter !== 'All') {
+        const taskTagList = parseTaskTags(task.tags).map((t) => t.toLowerCase());
+        if (!taskTagList.includes(tagFilter.toLowerCase())) return false;
+      }
       if (!q) return true;
       return (
         task.title.toLowerCase().includes(q) ||
@@ -161,7 +200,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
         (task.docTitle || '').toLowerCase().includes(q)
       );
     });
-  }, [tasks, searchQuery, priorityFilter]);
+  }, [tasks, searchQuery, priorityFilter, tagFilter]);
 
   const unlinkedDocsCount = useMemo(
     () => tasks.filter((t) => !t.docId).length,
@@ -205,7 +244,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
       priority: 'Medium',
       assignee: '',
       dueDate: new Date().toISOString().slice(0, 10),
-      tags: '',
+      tags: tagFilter !== 'All' ? tagFilter : '',
       notes: '',
     };
     onTasksChange([...tasks, newTask]);
@@ -248,6 +287,8 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
       [task.id]: buildTaskDocStarterBlocks(task, template),
     }));
   };
+
+  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   return (
     <div className="space-y-4">
@@ -341,6 +382,43 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
         </div>
       </div>
 
+      {/* Interactive Tag Filter Bar (color-coded according to tags) */}
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setTagFilter('All')}
+            className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+              tagFilter === 'All'
+                ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200/80 dark:bg-neutral-800/80 dark:text-neutral-300 dark:hover:bg-neutral-700'
+            }`}
+          >
+            All tags
+          </button>
+          {allTags.map((tag) => {
+            const theme = getTaskTagColorTheme(tag, customTagColors);
+            const isActive = tagFilter.toLowerCase() === tag.toLowerCase();
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() =>
+                  setTagFilter((curr) =>
+                    curr.toLowerCase() === tag.toLowerCase() ? 'All' : tag
+                  )
+                }
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  isActive ? theme.filterActiveClass : theme.filterInactiveClass
+                }`}
+              >
+                {tag}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Empty State */}
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-[#F8F8F7] px-6 py-14 text-center dark:border-neutral-800 dark:bg-[#20201E]">
@@ -376,13 +454,14 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                 }}
                 onDragLeave={() => setDragOverColumn(null)}
                 onDrop={() => handleDropOnColumn(columnStatus)}
-                className={`flex min-h-[260px] flex-col rounded-xl border p-3 transition-colors ${
+                className={`flex min-h-[290px] flex-col rounded-xl border p-3 transition-colors ${
                   isDropTarget
                     ? 'border-blue-400 bg-blue-50/40 dark:border-blue-500 dark:bg-blue-950/20'
                     : 'border-neutral-200/80 bg-[#F8F8F7] dark:border-neutral-800 dark:bg-[#20201E]'
                 }`}
               >
-                <div className="mb-2.5 flex items-center justify-between px-1">
+                {/* Column Header */}
+                <div className="mb-3 flex items-center justify-between px-1">
                   <div className="flex items-center gap-2">
                     {statusIcon(columnStatus)}
                     <span className="font-display text-xs font-semibold text-neutral-800 dark:text-neutral-200">
@@ -403,10 +482,21 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                   </button>
                 </div>
 
-                <div className="flex-1 space-y-2">
+                {/* Column Cards */}
+                <div className="flex-1 space-y-2.5">
                   <AnimatePresence initial={false}>
                     {colTasks.map((task) => {
                       const isDragging = draggedTaskId === task.id;
+                      const taskTags = parseTaskTags(task.tags);
+                      const primaryTagTheme =
+                        taskTags.length > 0
+                          ? getTaskTagColorTheme(taskTags[0], customTagColors)
+                          : null;
+                      const isOverdue =
+                        Boolean(task.dueDate) &&
+                        task.dueDate < todayIso &&
+                        task.status !== 'Done';
+
                       return (
                         <motion.div
                           key={task.id}
@@ -438,11 +528,86 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                                 setSelectedTaskId(task.id);
                               }
                             }}
-                            className="cursor-pointer rounded-lg border border-neutral-200 bg-white p-3 transition-colors hover:border-neutral-300 hover:shadow-xs dark:border-neutral-800 dark:bg-[#191918] dark:hover:border-neutral-700"
+                            className={`group relative cursor-pointer overflow-hidden rounded-lg border p-3 transition-all hover:shadow-xs ${
+                              primaryTagTheme
+                                ? primaryTagTheme.cardSurfaceClass
+                                : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-800 dark:bg-[#191918] dark:hover:border-neutral-700'
+                            }`}
                           >
+                            {/* Top horizontal tag color bar */}
+                            {primaryTagTheme && (
+                              <div
+                                className={`absolute inset-x-0 top-0 h-1 ${primaryTagTheme.cardTopBarClass}`}
+                              />
+                            )}
+
+                            {/* Colored Tag Row */}
+                            {taskTags.length > 0 && (
+                              <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
+                                {taskTags.map((tag, tIdx) => {
+                                  const tTheme = getTaskTagColorTheme(tag, customTagColors);
+                                  return (
+                                    <React.Fragment key={`${tag}-${tIdx}`}>
+                                      {tIdx > 0 && (
+                                        <span
+                                          aria-hidden="true"
+                                          className="text-neutral-300 dark:text-neutral-700"
+                                        >
+                                          ·
+                                        </span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setTagFilter((curr) =>
+                                            curr.toLowerCase() === tag.toLowerCase()
+                                              ? 'All'
+                                              : tag
+                                          );
+                                        }}
+                                        className={`${tTheme.textClass} hover:underline`}
+                                        title={`Filter board by "${tag}"`}
+                                      >
+                                        {tag}
+                                      </button>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Title + Quick Status Toggle + Linked Doc Indicator */}
                             <div className="flex items-start justify-between gap-2">
-                              <div className="text-sm font-medium leading-snug text-neutral-900 dark:text-neutral-100">
-                                {task.title || 'Untitled task'}
+                              <div className="flex min-w-0 items-start gap-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateTask(task.id, {
+                                      status:
+                                        task.status === 'Done' ? 'In Progress' : 'Done',
+                                    });
+                                  }}
+                                  className="mt-0.5 shrink-0 transition-transform hover:scale-110"
+                                  title={
+                                    task.status === 'Done'
+                                      ? 'Mark In Progress'
+                                      : 'Mark Done'
+                                  }
+                                  aria-label="Toggle task completion"
+                                >
+                                  {statusIcon(task.status)}
+                                </button>
+                                <div
+                                  className={`text-sm font-medium leading-snug ${
+                                    task.status === 'Done'
+                                      ? 'text-neutral-400 line-through dark:text-neutral-500'
+                                      : 'text-neutral-900 dark:text-neutral-100'
+                                  }`}
+                                >
+                                  {task.title || 'Untitled task'}
+                                </div>
                               </div>
                               {task.docId && (
                                 <span
@@ -454,31 +619,42 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                                   }
                                 >
                                   <FileText className="h-3.5 w-3.5" />
-                                  {task.dirtyTaskDoc && (
-                                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                                  )}
                                 </span>
                               )}
                             </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-                              <span className={priorityTextColor(task.priority)}>
-                                {task.priority}
-                              </span>
-                              {task.dueDate && (
-                                <>
-                                  <span aria-hidden="true">·</span>
-                                  <span className="font-mono text-[11px] tabular-nums">
-                                    {task.dueDate}
-                                  </span>
-                                </>
-                              )}
+
+                            {/* Optional Notes Preview */}
+                            {task.notes && task.notes.trim() && (
+                              <p className="mt-1.5 line-clamp-2 pl-5 text-xs text-neutral-500 dark:text-neutral-400">
+                                {task.notes}
+                              </p>
+                            )}
+
+                            {/* Card Footer Metadata */}
+                            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200/60 pt-2 text-xs text-neutral-500 dark:border-neutral-800/80 dark:text-neutral-400">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className={priorityTextColor(task.priority)}>
+                                  {task.priority}
+                                </span>
+                                {task.dueDate && (
+                                  <>
+                                    <span aria-hidden="true">·</span>
+                                    <span
+                                      className={`font-mono text-[11px] tabular-nums ${
+                                        isOverdue
+                                          ? 'font-medium text-red-600 dark:text-red-400'
+                                          : ''
+                                      }`}
+                                    >
+                                      {task.dueDate}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
                               {task.assignee && (
-                                <>
-                                  <span aria-hidden="true">·</span>
-                                  <span className="max-w-[110px] truncate">
-                                    {task.assignee}
-                                  </span>
-                                </>
+                                <span className="max-w-[115px] truncate text-[11px] font-medium text-neutral-600 dark:text-neutral-300">
+                                  {task.assignee}
+                                </span>
                               )}
                             </div>
                           </div>
@@ -487,6 +663,16 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                     })}
                   </AnimatePresence>
                 </div>
+
+                {/* Quick Add Task in Column Footer */}
+                <button
+                  type="button"
+                  onClick={() => createTask(columnStatus)}
+                  className="mt-2.5 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-700 dark:hover:bg-neutral-800/70 dark:hover:text-neutral-200"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>New task</span>
+                </button>
               </div>
             );
           })}
@@ -498,9 +684,10 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
             <thead>
               <tr className="border-b border-neutral-200 bg-[#F8F8F7] text-neutral-500 dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-400">
                 <th className="w-10 px-3 py-2.5 font-mono font-normal">#</th>
-                <th className="min-w-[220px] px-3 py-2.5 font-medium">Task</th>
+                <th className="min-w-[200px] px-3 py-2.5 font-medium">Task</th>
                 <th className="w-32 px-3 py-2.5 font-medium">Status</th>
                 <th className="w-24 px-3 py-2.5 font-medium">Priority</th>
+                <th className="w-40 px-3 py-2.5 font-medium">Tags</th>
                 <th className="w-32 px-3 py-2.5 font-medium">Assignee</th>
                 <th className="w-28 px-3 py-2.5 font-medium">Due Date</th>
                 <th className="w-36 px-3 py-2.5 font-medium">Google Doc Link</th>
@@ -508,122 +695,142 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
-              {filteredTasks.map((task, idx) => (
-                <tr
-                  key={task.id}
-                  className="h-10 transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-900/50"
-                >
-                  <td className="px-3 py-1.5 font-mono tabular-nums text-neutral-400">
-                    {idx + 1}
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <input
-                      type="text"
-                      value={task.title}
-                      onChange={(e) => updateTask(task.id, { title: e.target.value })}
-                      className="w-full bg-transparent text-xs font-medium text-neutral-900 outline-none focus:underline dark:text-neutral-100"
-                    />
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <select
-                      value={task.status}
-                      onChange={(e) =>
-                        updateTask(task.id, { status: e.target.value as TaskStatus })
-                      }
-                      className="w-full bg-transparent text-xs text-neutral-700 outline-none dark:text-neutral-300"
-                    >
-                      {STATUS_COLUMNS.map((s) => (
-                        <option key={s} value={s} className="dark:bg-[#20201E]">
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <select
-                      value={task.priority}
-                      onChange={(e) =>
-                        updateTask(task.id, {
-                          priority: e.target.value as TaskPriority,
-                        })
-                      }
-                      className={`w-full bg-transparent text-xs outline-none ${priorityTextColor(
-                        task.priority
-                      )}`}
-                    >
-                      {PRIORITIES.map((p) => (
-                        <option key={p} value={p} className="dark:bg-[#20201E]">
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <input
-                      type="text"
-                      value={task.assignee}
-                      placeholder="Unassigned"
-                      onChange={(e) =>
-                        updateTask(task.id, { assignee: e.target.value })
-                      }
-                      className="w-full bg-transparent text-xs text-neutral-700 outline-none placeholder:text-neutral-400 dark:text-neutral-300"
-                    />
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <input
-                      type="date"
-                      value={task.dueDate}
-                      onChange={(e) =>
-                        updateTask(task.id, { dueDate: e.target.value })
-                      }
-                      className="bg-transparent font-mono text-[11px] tabular-nums text-neutral-600 outline-none dark:text-neutral-400"
-                    />
-                  </td>
-                  <td className="px-3 py-1.5">
-                    {task.docId ? (
-                      <div className="flex items-center gap-2">
+              {filteredTasks.map((task, idx) => {
+                const rowTags = parseTaskTags(task.tags);
+                const firstTagTheme =
+                  rowTags.length > 0
+                    ? getTaskTagColorTheme(rowTags[0], customTagColors)
+                    : null;
+                return (
+                  <tr
+                    key={task.id}
+                    className="h-10 transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-900/50"
+                  >
+                    <td className="px-3 py-1.5 font-mono tabular-nums text-neutral-400">
+                      {idx + 1}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <input
+                        type="text"
+                        value={task.title}
+                        onChange={(e) => updateTask(task.id, { title: e.target.value })}
+                        className="w-full bg-transparent text-xs font-medium text-neutral-900 outline-none focus:underline dark:text-neutral-100"
+                      />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <select
+                        value={task.status}
+                        onChange={(e) =>
+                          updateTask(task.id, { status: e.target.value as TaskStatus })
+                        }
+                        className="w-full bg-transparent text-xs text-neutral-700 outline-none dark:text-neutral-300"
+                      >
+                        {STATUS_COLUMNS.map((s) => (
+                          <option key={s} value={s} className="dark:bg-[#20201E]">
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <select
+                        value={task.priority}
+                        onChange={(e) =>
+                          updateTask(task.id, {
+                            priority: e.target.value as TaskPriority,
+                          })
+                        }
+                        className={`w-full bg-transparent text-xs outline-none ${priorityTextColor(
+                          task.priority
+                        )}`}
+                      >
+                        {PRIORITIES.map((p) => (
+                          <option key={p} value={p} className="dark:bg-[#20201E]">
+                            {p}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <input
+                        type="text"
+                        value={task.tags}
+                        placeholder="Add tags..."
+                        onChange={(e) => updateTask(task.id, { tags: e.target.value })}
+                        className={`w-full bg-transparent text-xs font-medium outline-none placeholder:font-normal placeholder:text-neutral-400 ${
+                          firstTagTheme
+                            ? firstTagTheme.textClass
+                            : 'text-neutral-700 dark:text-neutral-300'
+                        }`}
+                      />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <input
+                        type="text"
+                        value={task.assignee}
+                        placeholder="Unassigned"
+                        onChange={(e) =>
+                          updateTask(task.id, { assignee: e.target.value })
+                        }
+                        className="w-full bg-transparent text-xs text-neutral-700 outline-none placeholder:text-neutral-400 dark:text-neutral-300"
+                      />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <input
+                        type="date"
+                        value={task.dueDate}
+                        onChange={(e) =>
+                          updateTask(task.id, { dueDate: e.target.value })
+                        }
+                        className="bg-transparent font-mono text-[11px] tabular-nums text-neutral-600 outline-none dark:text-neutral-400"
+                      />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      {task.docId ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTaskId(task.id)}
+                            className="inline-flex items-center gap-1 text-blue-600 hover:underline dark:text-blue-400"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            <span>{task.dirtyTaskDoc ? 'Edited' : 'Open Doc'}</span>
+                          </button>
+                          {task.docUrl && (
+                            <a
+                              href={task.docUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                              title="Open directly in Google Docs"
+                              aria-label="Open in Google Docs"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                        </div>
+                      ) : (
                         <button
                           type="button"
                           onClick={() => setSelectedTaskId(task.id)}
-                          className="inline-flex items-center gap-1 text-blue-600 hover:underline dark:text-blue-400"
+                          className="text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200"
                         >
-                          <FileText className="h-3.5 w-3.5" />
-                          <span>{task.dirtyTaskDoc ? 'Edited' : 'Open Doc'}</span>
+                          + Create Doc
                         </button>
-                        {task.docUrl && (
-                          <a
-                            href={task.docUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-                            title="Open directly in Google Docs"
-                            aria-label="Open in Google Docs"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        )}
-                      </div>
-                    ) : (
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-right">
                       <button
                         type="button"
                         onClick={() => setSelectedTaskId(task.id)}
-                        className="text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200"
+                        className="rounded px-2 py-1 text-[11px] font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
                       >
-                        + Create Doc
+                        Open
                       </button>
-                    )}
-                  </td>
-                  <td className="px-3 py-1.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedTaskId(task.id)}
-                      className="rounded px-2 py-1 text-[11px] font-medium text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                    >
-                      Open
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -646,71 +853,85 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                 </div>
                 <div className="divide-y divide-neutral-200 rounded-xl border border-neutral-200 bg-white dark:divide-neutral-800 dark:border-neutral-800 dark:bg-[#191918]">
                   <AnimatePresence initial={false}>
-                    {group.map((task) => (
-                      <motion.div
-                        key={task.id}
-                        layout="position"
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-                        onClick={() => setSelectedTaskId(task.id)}
-                        className="flex cursor-pointer items-center justify-between gap-4 px-4 py-2.5 transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-900/50"
-                      >
-                        <div className="flex min-w-0 items-center gap-3">
-                          <motion.button
-                            type="button"
-                            whileTap={{ scale: 0.84 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              updateTask(task.id, {
-                                status: task.status === 'Done' ? 'Backlog' : 'Done',
-                              });
-                            }}
-                            className="shrink-0"
-                            aria-label="Toggle task done"
-                          >
-                            {statusIcon(task.status)}
-                          </motion.button>
-                          <span
-                            className={`truncate text-sm ${
-                              task.status === 'Done'
-                                ? 'text-neutral-400 line-through'
-                                : 'font-medium text-neutral-900 dark:text-neutral-100'
-                            }`}
-                          >
-                            {task.title}
-                          </span>
-                          {task.docId && (
-                            <span
-                              className="inline-flex shrink-0 items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400"
-                              title="Google Doc linked"
+                    {group.map((task) => {
+                      const taskTags = parseTaskTags(task.tags);
+                      return (
+                        <motion.div
+                          key={task.id}
+                          layout="position"
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                          onClick={() => setSelectedTaskId(task.id)}
+                          className="flex cursor-pointer items-center justify-between gap-4 px-4 py-2.5 transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-900/50"
+                        >
+                          <div className="flex min-w-0 items-center gap-3">
+                            <motion.button
+                              type="button"
+                              whileTap={{ scale: 0.84 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateTask(task.id, {
+                                  status: task.status === 'Done' ? 'Backlog' : 'Done',
+                                });
+                              }}
+                              className="shrink-0"
+                              aria-label="Toggle task done"
                             >
-                              <FileText className="h-3.5 w-3.5" />
+                              {statusIcon(task.status)}
+                            </motion.button>
+                            <span
+                              className={`truncate text-sm ${
+                                task.status === 'Done'
+                                  ? 'text-neutral-400 line-through'
+                                  : 'font-medium text-neutral-900 dark:text-neutral-100'
+                              }`}
+                            >
+                              {task.title}
                             </span>
-                          )}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-                          <span className={priorityTextColor(task.priority)}>
-                            {task.priority}
-                          </span>
-                          {task.assignee && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span>{task.assignee}</span>
-                            </>
-                          )}
-                          {task.dueDate && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span className="font-mono text-[11px] tabular-nums">
-                                {task.dueDate}
+                            {task.docId && (
+                              <span
+                                className="inline-flex shrink-0 items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400"
+                                title="Google Doc linked"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
                               </span>
-                            </>
-                          )}
-                        </div>
-                      </motion.div>
-                    ))}
+                            )}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+                            {taskTags.map((tag) => {
+                              const tTheme = getTaskTagColorTheme(tag, customTagColors);
+                              return (
+                                <React.Fragment key={tag}>
+                                  <span className={`font-medium ${tTheme.textClass}`}>
+                                    {tag}
+                                  </span>
+                                  <span aria-hidden="true">·</span>
+                                </React.Fragment>
+                              );
+                            })}
+                            <span className={priorityTextColor(task.priority)}>
+                              {task.priority}
+                            </span>
+                            {task.assignee && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span>{task.assignee}</span>
+                              </>
+                            )}
+                            {task.dueDate && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="font-mono text-[11px] tabular-nums">
+                                  {task.dueDate}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </motion.div>
+                      );
+                    })}
                   </AnimatePresence>
                 </div>
               </div>
@@ -992,19 +1213,99 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                   </div>
 
                   <div className="grid grid-cols-1 gap-4 py-2 sm:grid-cols-2">
-                    <div className="flex items-center gap-4">
-                      <span className="w-24 shrink-0 text-neutral-500 dark:text-neutral-400">
+                    <div className="flex items-start gap-4">
+                      <span className="mt-1.5 w-24 shrink-0 text-neutral-500 dark:text-neutral-400">
                         Tags
                       </span>
-                      <input
-                        type="text"
-                        value={selectedTask.tags}
-                        placeholder="Design, Launch..."
-                        onChange={(e) =>
-                          updateTask(selectedTask.id, { tags: e.target.value })
-                        }
-                        className="flex-1 rounded-md bg-transparent px-2 py-1 text-neutral-900 outline-none hover:bg-neutral-100 focus:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800 dark:focus:bg-neutral-800"
-                      />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <input
+                          type="text"
+                          value={selectedTask.tags}
+                          placeholder="Design, Engineering, Launch..."
+                          onChange={(e) =>
+                            updateTask(selectedTask.id, { tags: e.target.value })
+                          }
+                          className="w-full rounded-md bg-transparent px-2 py-1 text-neutral-900 outline-none hover:bg-neutral-100 focus:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800 dark:focus:bg-neutral-800"
+                        />
+
+                        {/* Active tags with custom color picker + quick tag presets */}
+                        <div className="flex flex-wrap items-center gap-1.5 px-2">
+                          {parseTaskTags(selectedTask.tags).map((tag) => {
+                            const theme = getTaskTagColorTheme(tag, customTagColors);
+                            const isEditingColor =
+                              editingColorForTag?.toLowerCase() === tag.toLowerCase();
+                            return (
+                              <div key={tag} className="relative inline-flex items-center">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setEditingColorForTag((curr) =>
+                                      curr?.toLowerCase() === tag.toLowerCase()
+                                        ? null
+                                        : tag
+                                    )
+                                  }
+                                  className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${theme.filterInactiveClass}`}
+                                  title={`Click to change color for "${tag}"`}
+                                >
+                                  <span
+                                    className={`h-2 w-2 rounded-full ${theme.swatchClass}`}
+                                  />
+                                  <span>{tag}</span>
+                                </button>
+                                {isEditingColor && (
+                                  <div className="absolute left-0 top-full z-30 mt-1 flex items-center gap-1 rounded-lg border border-neutral-200 bg-white p-1.5 shadow-lg dark:border-neutral-700 dark:bg-[#242422]">
+                                    {TASK_TAG_COLOR_PALETTE.map((c) => (
+                                      <button
+                                        key={c.key}
+                                        type="button"
+                                        onClick={() => {
+                                          const updated = saveCustomTagColor(tag, c.key);
+                                          setCustomTagColors(updated);
+                                          setEditingColorForTag(null);
+                                        }}
+                                        className={`h-4 w-4 rounded-full transition-transform hover:scale-110 ${c.swatchClass} ${
+                                          theme.key === c.key
+                                            ? 'ring-2 ring-neutral-900 ring-offset-1 dark:ring-white dark:ring-offset-neutral-900'
+                                            : ''
+                                        }`}
+                                        title={c.label}
+                                        aria-label={`Set ${tag} color to ${c.label}`}
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+
+                          {/* Quick preset tags to add with one click */}
+                          {['Design', 'Engineering', 'Launch', 'Research', 'Product', 'Bug']
+                            .filter(
+                              (preset) =>
+                                !parseTaskTags(selectedTask.tags)
+                                  .map((t) => t.toLowerCase())
+                                  .includes(preset.toLowerCase())
+                            )
+                            .slice(0, 4)
+                            .map((preset) => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => {
+                                  const existing = parseTaskTags(selectedTask.tags);
+                                  updateTask(selectedTask.id, {
+                                    tags: [...existing, preset].join(', '),
+                                  });
+                                }}
+                                className="rounded-md border border-dashed border-neutral-200 px-1.5 py-0.5 text-[11px] text-neutral-400 transition-colors hover:border-neutral-300 hover:text-neutral-700 dark:border-neutral-700 dark:hover:border-neutral-600 dark:hover:text-neutral-200"
+                                title={`Add "${preset}" tag`}
+                              >
+                                + {preset}
+                              </button>
+                            ))}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-4">

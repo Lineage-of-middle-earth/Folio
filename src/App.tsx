@@ -88,6 +88,7 @@ import { DriveBrowserView } from './components/DriveBrowserView';
 import { CommandPalette } from './components/CommandPalette';
 import { ConfirmModal } from './components/ConfirmModal';
 import { DailyPlannerView } from './components/DailyPlannerView';
+import { HomeTasksSection } from './components/HomeTasksSection';
 import { LinkWorkspaceModal } from './components/LinkWorkspaceModal';
 import { NewProjectModal } from './components/NewProjectModal';
 
@@ -3782,6 +3783,40 @@ export default function App() {
                 )}
               </div>
 
+              {/* Tasks Section on Home Dashboard */}
+              <HomeTasksSection
+                userId={user?.uid || 'local'}
+                projects={projects}
+                onUpdateProjectTask={(projectId, taskId, patch) => {
+                  updateLocalProject(projectId, (p) => ({
+                    ...p,
+                    tasks: p.tasks.map((t) =>
+                      t.id === taskId ? { ...t, ...patch } : t
+                    ),
+                    dirtyTasks: true,
+                  }));
+                }}
+                onAddProjectTask={(projectId, newTask) => {
+                  updateLocalProject(projectId, (p) => ({
+                    ...p,
+                    tasks: [...p.tasks, newTask],
+                    dirtyTasks: true,
+                  }));
+                }}
+                onOpenProjectTask={(projectId, taskId) => {
+                  setActiveProjectId(projectId);
+                  setActiveArea('project');
+                  setActiveTab('board');
+                  setRequestedTaskId(taskId);
+                }}
+                onOpenProject={(projectId) => {
+                  setActiveProjectId(projectId);
+                  setActiveArea('project');
+                  setActiveTab('page');
+                }}
+                onOpenDailyPlanner={() => setActiveArea('daily-planner')}
+              />
+
               {/* Folder Groups Section on Overview */}
               {folderGroups.length > 0 && (
                 <div>
@@ -4095,6 +4130,37 @@ export default function App() {
                                   </>
                                 )}
                               </div>
+
+                              {p.tasks.length > 0 && (
+                                <div className="mt-3 space-y-1 border-t border-neutral-100 pt-2.5 dark:border-neutral-800/80">
+                                  {p.tasks.slice(0, 3).map((t) => (
+                                    <button
+                                      key={t.id}
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveProjectId(p.id);
+                                        setActiveArea('project');
+                                        setActiveTab('board');
+                                        setRequestedTaskId(t.id);
+                                      }}
+                                      className="flex w-full items-center justify-between gap-2 text-left text-xs text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                                    >
+                                      <span
+                                        className={`truncate ${
+                                          t.status === 'Done'
+                                            ? 'text-neutral-400 line-through dark:text-neutral-500'
+                                            : 'font-medium text-neutral-700 dark:text-neutral-300'
+                                        }`}
+                                      >
+                                        {t.title || 'Untitled task'}
+                                      </span>
+                                      <span className="shrink-0 text-[11px] text-neutral-400">
+                                        {t.status}
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                             </div>
 
                             <div className="mt-4 flex items-center justify-between border-t border-neutral-100 pt-3 text-xs dark:border-neutral-800">
