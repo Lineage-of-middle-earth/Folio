@@ -9,7 +9,6 @@ import {
 import { getCoverPresetByIndex } from './coverAssets';
 import {
   buildStandaloneDocStarterBlocks,
-  buildTaskDocStarterBlocks,
   uid,
 } from './googleWorkspaceApi';
 
@@ -44,7 +43,6 @@ export function createLocalWorkspaceProject(
   coverIndex: number
 ): ProjectWorkspace {
   const nowIso = new Date().toISOString();
-  const today = nowIso.slice(0, 10);
   const projectId = uid('local_proj');
   const folderId = uid('local_folder');
   const sheetId = uid('local_sheet');
@@ -52,70 +50,10 @@ export function createLocalWorkspaceProject(
   const preset = getCoverPresetByIndex(coverIndex);
 
   const starterBlocks: DocBlock[] = [
-    { id: uid('blk'), type: 'h1', content: `${title} Overview` },
-    {
-      id: uid('blk'),
-      type: 'callout',
-      content:
-        'Guest Mode (Local Storage): All pages, tasks, documents, and files in this project are saved directly in your browser on this device.',
-    },
-    { id: uid('blk'), type: 'h2', content: 'Objectives' },
-    {
-      id: uid('blk'),
-      type: 'todo',
-      checked: false,
-      content: 'Define scope and key deliverables',
-    },
-    {
-      id: uid('blk'),
-      type: 'todo',
-      checked: false,
-      content: 'Organize tasks and nested document pages',
-    },
-    { id: uid('blk'), type: 'h2', content: 'Notes' },
-    {
-      id: uid('blk'),
-      type: 'paragraph',
-      content:
-        'Type / anywhere below to add headings, checklists, callouts, sub-pages, or code blocks.',
-    },
+    { id: uid('blk'), type: 'paragraph', content: '' },
   ];
 
-  const baseTasks: TaskItem[] = [
-    {
-      id: uid('task'),
-      title: 'Kickoff project brief and timeline',
-      status: 'In Progress',
-      priority: 'High',
-      assignee: 'Guest',
-      dueDate: today,
-      tags: 'Planning',
-      notes: '',
-    },
-    {
-      id: uid('task'),
-      title: 'Draft milestones & action items',
-      status: 'Backlog',
-      priority: 'Medium',
-      assignee: 'Guest',
-      dueDate: today,
-      tags: 'Roadmap',
-      notes: '',
-    },
-  ];
-
-  const starterTasks: TaskItem[] = baseTasks.map((t) => {
-    const taskDocId = uid('local_tdoc');
-    const blocks = buildTaskDocStarterBlocks(t, 'spec');
-    return {
-      ...t,
-      docId: taskDocId,
-      docTitle: t.title,
-      docUrl: '',
-      docBlocks: blocks,
-      dirtyTaskDoc: false,
-    };
-  });
+  const starterTasks: TaskItem[] = [];
 
   const driveFiles: DriveFileItem[] = [
     {
@@ -131,13 +69,6 @@ export function createLocalWorkspaceProject(
       mimeType: 'application/vnd.google-apps.spreadsheet',
       modifiedTime: nowIso,
     },
-    ...starterTasks.map((t) => ({
-      id: t.docId || uid('local_file'),
-      name: t.docTitle || t.title,
-      mimeType: 'application/vnd.google-apps.document',
-      modifiedTime: nowIso,
-      appProperties: { folioTaskDoc: 'true', folioTaskId: t.id },
-    })),
   ];
 
   return {

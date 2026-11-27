@@ -51,9 +51,9 @@ interface DocumentsHubProps {
 }
 
 const DOC_TEMPLATES: Array<{ id: TaskDocTemplate; label: string; description: string }> = [
+  { id: 'blank', label: 'Blank Document', description: 'Clean empty page' },
   { id: 'spec', label: 'Project Spec', description: 'Overview, goals & checklist' },
   { id: 'meeting', label: 'Meeting Notes', description: 'Agenda, decisions & actions' },
-  { id: 'blank', label: 'Blank Document', description: 'Clean heading & body' },
 ];
 
 export const DocumentsHub: React.FC<DocumentsHubProps> = ({
@@ -77,7 +77,7 @@ export const DocumentsHub: React.FC<DocumentsHubProps> = ({
 }) => {
   const [showCreator, setShowCreator] = useState(false);
   const [newDocTitle, setNewDocTitle] = useState('');
-  const [newDocTemplate, setNewDocTemplate] = useState<TaskDocTemplate>('spec');
+  const [newDocTemplate, setNewDocTemplate] = useState<TaskDocTemplate>('blank');
   const [docViewMode, setDocViewMode] = useState<'side' | 'fullscreen'>('side');
   const [creatorOpenMode, setCreatorOpenMode] = useState<'side' | 'fullscreen'>('side');
 

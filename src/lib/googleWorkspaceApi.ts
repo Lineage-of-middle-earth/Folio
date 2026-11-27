@@ -799,7 +799,7 @@ export async function syncBlocksToDoc(
 
 export function buildTaskDocStarterBlocks(
   task: Pick<TaskItem, 'title' | 'status' | 'priority' | 'assignee' | 'dueDate' | 'notes'>,
-  template: TaskDocTemplate = 'spec'
+  template: TaskDocTemplate = 'blank'
 ): DocBlock[] {
   const title = task.title.trim() || 'Untitled task';
   const metaParts = [
@@ -811,7 +811,6 @@ export function buildTaskDocStarterBlocks(
 
   if (template === 'blank') {
     return [
-      { id: uid('blk'), type: 'h1', content: title },
       {
         id: uid('blk'),
         type: 'paragraph',
@@ -828,16 +827,16 @@ export function buildTaskDocStarterBlocks(
       {
         id: uid('blk'),
         type: 'bullet',
-        content: task.assignee ? `Lead: ${task.assignee}` : 'Lead: Unassigned',
+        content: task.assignee ? `Lead: ${task.assignee}` : '',
       },
       { id: uid('blk'), type: 'h2', content: 'Discussion & Decisions' },
       {
         id: uid('blk'),
         type: 'paragraph',
-        content: task.notes || 'Capture key notes, decisions, and open questions here.',
+        content: task.notes || '',
       },
       { id: uid('blk'), type: 'h2', content: 'Action Items' },
-      { id: uid('blk'), type: 'todo', checked: false, content: 'Document next steps and owner' },
+      { id: uid('blk'), type: 'todo', checked: false, content: '' },
     ];
   }
 
@@ -848,18 +847,15 @@ export function buildTaskDocStarterBlocks(
     {
       id: uid('blk'),
       type: 'paragraph',
-      content:
-        task.notes ||
-        'Outline the scope, requirements, and expected deliverables for this task.',
+      content: task.notes || '',
     },
     { id: uid('blk'), type: 'h2', content: 'Deliverables & Checklist' },
-    { id: uid('blk'), type: 'todo', checked: false, content: 'Define acceptance criteria' },
-    { id: uid('blk'), type: 'todo', checked: false, content: 'Complete execution and review' },
+    { id: uid('blk'), type: 'todo', checked: false, content: '' },
     { id: uid('blk'), type: 'h2', content: 'Working Notes' },
     {
       id: uid('blk'),
       type: 'paragraph',
-      content: 'Type / anywhere to add headings, checklists, callouts, quotes, or code blocks.',
+      content: '',
     },
   ];
 }
@@ -906,38 +902,33 @@ export async function createProjectDocument(
 
 export function buildStandaloneDocStarterBlocks(
   title: string,
-  template: TaskDocTemplate = 'spec'
+  template: TaskDocTemplate = 'blank'
 ): DocBlock[] {
   const cleanTitle = title.trim() || 'Untitled Document';
   if (template === 'blank') {
-    return [
-      { id: uid('blk'), type: 'h1', content: cleanTitle },
-      { id: uid('blk'), type: 'paragraph', content: '' },
-    ];
+    return [{ id: uid('blk'), type: 'paragraph', content: '' }];
   }
   if (template === 'meeting') {
     return [
       { id: uid('blk'), type: 'h1', content: cleanTitle },
-      { id: uid('blk'), type: 'callout', content: 'Meeting Notes · Synced with Google Docs' },
       { id: uid('blk'), type: 'h2', content: 'Agenda' },
-      { id: uid('blk'), type: 'bullet', content: 'Topic 1' },
+      { id: uid('blk'), type: 'bullet', content: '' },
       { id: uid('blk'), type: 'h2', content: 'Key Decisions' },
-      { id: uid('blk'), type: 'paragraph', content: 'Summarize outcomes and rationale here.' },
+      { id: uid('blk'), type: 'paragraph', content: '' },
       { id: uid('blk'), type: 'h2', content: 'Action Items' },
-      { id: uid('blk'), type: 'todo', checked: false, content: 'Assign follow-up owner' },
+      { id: uid('blk'), type: 'todo', checked: false, content: '' },
     ];
   }
   return [
     { id: uid('blk'), type: 'h1', content: cleanTitle },
-    { id: uid('blk'), type: 'callout', content: 'Project Document · Synced directly with Google Docs' },
     { id: uid('blk'), type: 'h2', content: 'Overview' },
     {
       id: uid('blk'),
       type: 'paragraph',
-      content: 'Write your specification, plan, or reference guide here.',
+      content: '',
     },
     { id: uid('blk'), type: 'h2', content: 'Checklist' },
-    { id: uid('blk'), type: 'todo', checked: false, content: 'Draft initial sections' },
+    { id: uid('blk'), type: 'todo', checked: false, content: '' },
   ];
 }
 
@@ -1091,10 +1082,7 @@ export async function discoverStandaloneWorkspacePages(
       blocks:
         blocks.length > 0
           ? blocks
-          : [
-              { id: uid('blk'), type: 'h1', content: docTitle },
-              { id: uid('blk'), type: 'paragraph', content: '' },
-            ],
+          : [{ id: uid('blk'), type: 'paragraph', content: '' }],
       dirty: false,
       lastSyncedAt: new Date().toISOString(),
       modifiedTime: file.modifiedTime,
@@ -1203,14 +1191,7 @@ export async function discoverWorkspaceProjects(
       blocks:
         blocks.length > 0
           ? blocks
-          : [
-              { id: uid('blk'), type: 'h1', content: folder.name },
-              {
-                id: uid('blk'),
-                type: 'paragraph',
-                content: 'Write your project goals, milestones, and meeting notes here. Press / for block types.',
-              },
-            ],
+          : [{ id: uid('blk'), type: 'paragraph', content: '' }],
       extraDocs,
       tasks,
       driveFiles: files,
@@ -1233,71 +1214,10 @@ export async function createFullWorkspaceProject(
   const folder = await createDriveFolder(token, title, rootFolderId);
 
   const starterBlocks: DocBlock[] = [
-    { id: uid('blk'), type: 'h1', content: `${title} Overview` },
-    {
-      id: uid('blk'),
-      type: 'callout',
-      content: 'This Notion-style page is synced directly with Google Docs and Google Sheets inside your Drive folder.',
-    },
-    { id: uid('blk'), type: 'h2', content: 'Objectives' },
-    { id: uid('blk'), type: 'todo', checked: false, content: 'Define scope and key deliverables' },
-    { id: uid('blk'), type: 'todo', checked: false, content: 'Assign owners in the connected Task Sheet' },
-    { id: uid('blk'), type: 'h2', content: 'Notes' },
-    {
-      id: uid('blk'),
-      type: 'paragraph',
-      content: 'Type / anywhere below to add headings, checklists, callouts, or code blocks.',
-    },
+    { id: uid('blk'), type: 'paragraph', content: '' },
   ];
 
-  const today = new Date().toISOString().slice(0, 10);
-  const baseTasks: TaskItem[] = [
-    {
-      id: uid('task'),
-      title: 'Kickoff project brief and timeline',
-      status: 'In Progress',
-      priority: 'High',
-      assignee: 'Owner',
-      dueDate: today,
-      tags: 'Planning',
-      notes: '',
-    },
-    {
-      id: uid('task'),
-      title: 'Review Drive folder assets',
-      status: 'Backlog',
-      priority: 'Medium',
-      assignee: 'Owner',
-      dueDate: today,
-      tags: 'Drive',
-      notes: '',
-    },
-  ];
-
-  const taskDocsFolderId = await findOrCreateTaskDocsFolder(token, folder.id);
-  const starterTasks: TaskItem[] = await Promise.all(
-    baseTasks.map(async (task) => {
-      const blocks = buildTaskDocStarterBlocks(task, 'spec');
-      const taskDoc = await createProjectDocument(
-        token,
-        task.title,
-        taskDocsFolderId,
-        blocks,
-        {
-          folioTaskDoc: 'true',
-          folioTaskId: task.id,
-        }
-      );
-      return {
-        ...task,
-        docId: taskDoc.documentId,
-        docUrl: taskDoc.documentUrl,
-        docTitle: task.title,
-        docBlocks: blocks,
-        dirtyTaskDoc: false,
-      };
-    })
-  );
+  const starterTasks: TaskItem[] = [];
 
   const [sheetInfo, docInfo] = await Promise.all([
     createProjectSpreadsheet(token, `${title} — Tasks`, folder.id, starterTasks),

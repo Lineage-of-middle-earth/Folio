@@ -1414,7 +1414,7 @@ export default function App() {
     const defaultTitle = `${targetProject.title} — Page ${
       targetProject.extraDocs.length + 1
     }`;
-    const starterBlocks = buildStandaloneDocStarterBlocks(defaultTitle, 'spec');
+    const starterBlocks = buildStandaloneDocStarterBlocks(defaultTitle, 'blank');
     handleCreateStandaloneDoc(targetProject, defaultTitle, starterBlocks);
   };
 
@@ -2372,7 +2372,7 @@ export default function App() {
           if (t.docId) return t;
           const localDocId = uid('local_tdoc');
           const cleanTitle = t.title.trim() || 'Untitled task';
-          const blocks = buildTaskDocStarterBlocks(t, 'spec');
+          const blocks = buildTaskDocStarterBlocks(t, 'blank');
           newDriveItems.push({
             id: localDocId,
             name: cleanTitle,
@@ -2429,7 +2429,7 @@ export default function App() {
         >();
 
         for (const task of unlinked) {
-          const blocks = buildTaskDocStarterBlocks(task, 'spec');
+          const blocks = buildTaskDocStarterBlocks(task, 'blank');
           const created = await createTaskDocument(freshToken, {
             title: task.title.trim() || 'Untitled task',
             projectFolderId: project.driveFolderId,
@@ -2729,7 +2729,7 @@ export default function App() {
 
     if (isGuestMode) {
       const nowIso = new Date().toISOString();
-      const starterBlocks = buildStandaloneDocStarterBlocks(cleanTitle, 'spec');
+      const starterBlocks = buildStandaloneDocStarterBlocks(cleanTitle, 'blank');
       const createdDoc: ProjectDocPage = {
         id: uid('local_subdoc'),
         title: cleanTitle,
@@ -2820,7 +2820,7 @@ export default function App() {
         const freshToken = requireToken();
         if (!freshToken) return;
 
-        const starterBlocks = buildStandaloneDocStarterBlocks(cleanTitle, 'spec');
+        const starterBlocks = buildStandaloneDocStarterBlocks(cleanTitle, 'blank');
         const createdDoc = await createStandaloneProjectDocument(freshToken, {
           title: cleanTitle,
           projectFolderId: project.driveFolderId,

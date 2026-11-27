@@ -511,22 +511,26 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                 </div>
               )}
 
-              {/* Project Filter */}
-              {projects.length > 1 && (
-                <select
-                  value={projectFilter}
-                  onChange={(e) => setProjectFilter(e.target.value)}
-                  aria-label="Filter tasks by project"
-                  className="rounded-lg border border-neutral-200/90 bg-white px-2.5 py-1.5 text-xs text-neutral-600 outline-none focus:border-neutral-400 dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-300"
-                >
-                  <option value="All">All projects</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.icon} {p.title}
-                    </option>
-                  ))}
-                </select>
-              )}
+              {/* Project Dropdown Filter */}
+              <select
+                value={projectFilter}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setProjectFilter(val);
+                  if (val !== 'All') {
+                    setQuickProjectId(val);
+                  }
+                }}
+                aria-label="Filter tasks by project"
+                className="rounded-lg border border-neutral-200/90 bg-white px-2.5 py-1.5 text-xs text-neutral-600 outline-none focus:border-neutral-400 dark:border-neutral-800 dark:bg-[#20201E] dark:text-neutral-300"
+              >
+                <option value="All">All projects ({allEntries.length})</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.icon} {p.title} ({p.tasks.length})
+                  </option>
+                ))}
+              </select>
 
               {/* Search */}
               <div className="relative">
@@ -540,6 +544,56 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                 />
               </div>
             </div>
+          </div>
+
+          {/* Interactive Project Filter Bar */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setProjectFilter('All')}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                projectFilter === 'All'
+                  ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                  : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200/80 dark:bg-neutral-800/80 dark:text-neutral-300 dark:hover:bg-neutral-700'
+              }`}
+            >
+              All projects
+            </button>
+            {projects.map((p) => {
+              const isActive = projectFilter === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setProjectFilter((curr) => {
+                      const next = curr === p.id ? 'All' : p.id;
+                      if (next !== 'All') {
+                        setQuickProjectId(next);
+                      }
+                      return next;
+                    });
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                    isActive
+                      ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                      : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200/80 dark:bg-neutral-800/80 dark:text-neutral-300 dark:hover:bg-neutral-700'
+                  }`}
+                >
+                  <span>{p.icon}</span>
+                  <span className="max-w-[150px] truncate">{p.title}</span>
+                  <span
+                    className={`font-mono text-[11px] tabular-nums ${
+                      isActive
+                        ? 'text-neutral-300 dark:text-neutral-600'
+                        : 'text-neutral-400 dark:text-neutral-500'
+                    }`}
+                  >
+                    {p.tasks.length}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Interactive Tag Filter Bar */}
@@ -642,20 +696,24 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                     ? 'No tasks across your projects yet. Add one above to get started.'
                     : 'No tasks match the current filter.'}
                 </span>
-                {statusFilter !== 'All' && allEntries.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStatusFilter('All');
-                      setTagFilter('All');
-                      setProjectFilter('All');
-                      setSearchQuery('');
-                    }}
-                    className="font-medium text-neutral-800 hover:underline dark:text-neutral-200"
-                  >
-                    Show all tasks
-                  </button>
-                )}
+                {(statusFilter !== 'All' ||
+                  projectFilter !== 'All' ||
+                  tagFilter !== 'All' ||
+                  searchQuery.trim() !== '') &&
+                  allEntries.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusFilter('All');
+                        setTagFilter('All');
+                        setProjectFilter('All');
+                        setSearchQuery('');
+                      }}
+                      className="font-medium text-neutral-800 hover:underline dark:text-neutral-200"
+                    >
+                      Show all tasks
+                    </button>
+                  )}
               </div>
             ) : (
               <div className="divide-y divide-neutral-200 rounded-xl border border-neutral-200 bg-white dark:divide-neutral-800 dark:border-neutral-800 dark:bg-[#20201E]">
@@ -805,8 +863,8 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
               </div>
             )
           ) : (
-            /* HOME DASHBOARD BOARD VIEW */
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            /* HOME DASHBOARD BOARD VIEW (containerless columns with tight gap) */
+            <div className="grid grid-cols-1 items-start gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
               {STATUS_COLUMNS.map((columnStatus) => {
                 const colEntries = filteredEntries.filter(
                   ({ task }) => task.status === columnStatus
@@ -830,14 +888,14 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                       setDraggedItem(null);
                       setDragOverColumn(null);
                     }}
-                    className={`flex min-h-[240px] flex-col rounded-xl border p-3 transition-colors ${
+                    className={`flex flex-col rounded-lg transition-colors ${
                       isDropTarget
-                        ? 'border-blue-400 bg-blue-50/40 dark:border-blue-500 dark:bg-blue-950/20'
-                        : 'border-neutral-200/80 bg-[#F8F8F7] dark:border-neutral-800 dark:bg-[#20201E]'
+                        ? '-m-1.5 bg-blue-50/50 p-1.5 ring-1 ring-blue-400/60 dark:bg-blue-950/25 dark:ring-blue-500/50'
+                        : ''
                     }`}
                   >
-                    <div className="mb-2.5 flex items-center justify-between px-1">
-                      <div className="flex items-center gap-2">
+                    <div className="mb-2 flex items-center justify-between px-0.5">
+                      <div className="flex items-center gap-1.5">
                         {statusIcon(columnStatus)}
                         <span className="font-display text-xs font-semibold text-neutral-800 dark:text-neutral-200">
                           {columnStatus}
@@ -848,7 +906,7 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex-1 space-y-2.5">
+                    <div className="space-y-2">
                       <AnimatePresence initial={false}>
                         {colEntries.map(({ project, task }) => {
                           const taskTags = parseTaskTags(task.tags);
@@ -868,7 +926,7 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                               initial={{ opacity: 0, y: 6, scale: 0.98 }}
                               animate={{ opacity: 1, y: 0, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.96 }}
-                              whileHover={{ y: -2 }}
+                              whileHover={{ y: -1.5 }}
                               transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
                             >
                               <div
@@ -892,7 +950,7 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                                     onOpenProjectTask(project.id, task.id);
                                   }
                                 }}
-                                className={`group relative cursor-pointer overflow-hidden rounded-lg border p-3 transition-all hover:shadow-xs ${
+                                className={`group relative cursor-pointer overflow-hidden rounded-lg border px-2.5 py-2 transition-all hover:shadow-xs ${
                                   primaryTagTheme
                                     ? primaryTagTheme.cardSurfaceClass
                                     : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-800 dark:bg-[#191918] dark:hover:border-neutral-700'
@@ -900,12 +958,12 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                               >
                                 {primaryTagTheme && (
                                   <div
-                                    className={`absolute inset-x-0 top-0 h-1 ${primaryTagTheme.cardTopBarClass}`}
+                                    className={`absolute inset-x-0 top-0 h-0.5 ${primaryTagTheme.cardTopBarClass}`}
                                   />
                                 )}
 
                                 {/* Colored Tags + Project Context */}
-                                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                                <div className="mb-1 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
                                   <div className="flex flex-wrap items-center gap-1.5 font-medium">
                                     {taskTags.map((tag, idx) => {
                                       const tTheme = getTaskTagColorTheme(
@@ -970,7 +1028,7 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                                       {statusIcon(task.status)}
                                     </button>
                                     <div
-                                      className={`text-sm font-medium leading-snug ${
+                                      className={`text-[13px] font-medium leading-snug ${
                                         task.status === 'Done'
                                           ? 'text-neutral-400 line-through dark:text-neutral-500'
                                           : 'text-neutral-900 dark:text-neutral-100'
@@ -984,7 +1042,7 @@ export const HomeTasksSection: React.FC<HomeTasksSectionProps> = ({
                                   )}
                                 </div>
 
-                                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1.5 border-t border-neutral-200/60 pt-2 text-xs text-neutral-500 dark:border-neutral-800/80 dark:text-neutral-400">
+                                <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5 border-t border-neutral-200/50 pt-1.5 text-[11px] text-neutral-500 dark:border-neutral-800/70 dark:text-neutral-400">
                                   <div className="flex items-center gap-1.5">
                                     <span className={priorityTextColor(task.priority)}>
                                       {task.priority}

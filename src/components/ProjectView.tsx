@@ -610,7 +610,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
         </div>
 
         {/* Active View Content */}
-        <div className="mt-7">
+        <div className="mt-5">
           <AnimatePresence mode="wait" initial={false}>
           {activeTab === 'page' && (
             <motion.div
@@ -619,7 +619,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-              className="space-y-10"
+              className="space-y-6"
             >
               <BlockEditor
                 blocks={project.blocks}
@@ -646,7 +646,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                   );
                   if (briefSubPages.length === 0) return null;
                   return (
-                    <div className="border-t border-neutral-200 pt-6 dark:border-neutral-800">
+                    <div className="border-t border-neutral-200 pt-5 dark:border-neutral-800">
                       <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
                         Sub-Pages inside Brief ({briefSubPages.length})
                       </h3>
@@ -675,8 +675,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 })()}
 
               {/* Inline Notion Database Embed inside Page */}
-              <div className="border-t border-neutral-200 pt-8 dark:border-neutral-800">
-                <div className="mb-4 flex items-center justify-between">
+              <div className="border-t border-neutral-200 pt-6 dark:border-neutral-800">
+                <div className="mb-3 flex items-center justify-between">
                   <h2 className="font-display text-base font-semibold text-neutral-900 dark:text-neutral-100">
                     Tasks
                   </h2>

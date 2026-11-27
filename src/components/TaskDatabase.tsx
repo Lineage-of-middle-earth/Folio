@@ -76,9 +76,9 @@ const STATUS_COLUMNS: TaskStatus[] = ['Backlog', 'In Progress', 'In Review', 'Do
 const PRIORITIES: TaskPriority[] = ['Low', 'Medium', 'High', 'Urgent'];
 
 const DOC_TEMPLATES: Array<{ id: TaskDocTemplate; label: string }> = [
+  { id: 'blank', label: 'Blank Doc' },
   { id: 'spec', label: 'Task Spec' },
   { id: 'meeting', label: 'Meeting Notes' },
-  { id: 'blank', label: 'Blank Doc' },
 ];
 
 function statusIcon(status: TaskStatus) {
@@ -271,7 +271,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
   };
 
   const getDraftTemplate = (taskId: string): TaskDocTemplate =>
-    draftTemplateMap[taskId] || 'spec';
+    draftTemplateMap[taskId] || 'blank';
 
   const getDraftTitle = (task: TaskItem): string =>
     draftTitleMap[task.id] ?? (task.title.trim() || 'Untitled task');
@@ -440,7 +440,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
         </div>
       ) : viewMode === 'board' ? (
         /* BOARD (KANBAN) VIEW */
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 items-start gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
           {STATUS_COLUMNS.map((columnStatus) => {
             const colTasks = filteredTasks.filter((t) => t.status === columnStatus);
             const isDropTarget = dragOverColumn === columnStatus;
@@ -454,15 +454,15 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                 }}
                 onDragLeave={() => setDragOverColumn(null)}
                 onDrop={() => handleDropOnColumn(columnStatus)}
-                className={`flex min-h-[290px] flex-col rounded-xl border p-3 transition-colors ${
+                className={`flex flex-col rounded-lg transition-colors ${
                   isDropTarget
-                    ? 'border-blue-400 bg-blue-50/40 dark:border-blue-500 dark:bg-blue-950/20'
-                    : 'border-neutral-200/80 bg-[#F8F8F7] dark:border-neutral-800 dark:bg-[#20201E]'
+                    ? '-m-1.5 bg-blue-50/50 p-1.5 ring-1 ring-blue-400/60 dark:bg-blue-950/25 dark:ring-blue-500/50'
+                    : ''
                 }`}
               >
                 {/* Column Header */}
-                <div className="mb-3 flex items-center justify-between px-1">
-                  <div className="flex items-center gap-2">
+                <div className="mb-2 flex items-center justify-between px-0.5">
+                  <div className="flex items-center gap-1.5">
                     {statusIcon(columnStatus)}
                     <span className="font-display text-xs font-semibold text-neutral-800 dark:text-neutral-200">
                       {columnStatus}
@@ -474,7 +474,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                   <button
                     type="button"
                     onClick={() => createTask(columnStatus)}
-                    className="rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-200/70 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                    className="rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
                     title={`Add task to ${columnStatus}`}
                     aria-label={`Add task to ${columnStatus}`}
                   >
@@ -483,7 +483,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                 </div>
 
                 {/* Column Cards */}
-                <div className="flex-1 space-y-2.5">
+                <div className="space-y-2">
                   <AnimatePresence initial={false}>
                     {colTasks.map((task) => {
                       const isDragging = draggedTaskId === task.id;
@@ -508,7 +508,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                             scale: isDragging ? 0.98 : 1,
                           }}
                           exit={{ opacity: 0, scale: 0.96 }}
-                          whileHover={{ y: -2 }}
+                          whileHover={{ y: -1.5 }}
                           whileTap={{ scale: 0.985 }}
                           transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
                         >
@@ -528,7 +528,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                                 setSelectedTaskId(task.id);
                               }
                             }}
-                            className={`group relative cursor-pointer overflow-hidden rounded-lg border p-3 transition-all hover:shadow-xs ${
+                            className={`group relative cursor-pointer overflow-hidden rounded-lg border px-2.5 py-2 transition-all hover:shadow-xs ${
                               primaryTagTheme
                                 ? primaryTagTheme.cardSurfaceClass
                                 : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-800 dark:bg-[#191918] dark:hover:border-neutral-700'
@@ -537,13 +537,13 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                             {/* Top horizontal tag color bar */}
                             {primaryTagTheme && (
                               <div
-                                className={`absolute inset-x-0 top-0 h-1 ${primaryTagTheme.cardTopBarClass}`}
+                                className={`absolute inset-x-0 top-0 h-0.5 ${primaryTagTheme.cardTopBarClass}`}
                               />
                             )}
 
                             {/* Colored Tag Row */}
                             {taskTags.length > 0 && (
-                              <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
+                              <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
                                 {taskTags.map((tag, tIdx) => {
                                   const tTheme = getTaskTagColorTheme(tag, customTagColors);
                                   return (
@@ -600,7 +600,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                                   {statusIcon(task.status)}
                                 </button>
                                 <div
-                                  className={`text-sm font-medium leading-snug ${
+                                  className={`text-[13px] font-medium leading-snug ${
                                     task.status === 'Done'
                                       ? 'text-neutral-400 line-through dark:text-neutral-500'
                                       : 'text-neutral-900 dark:text-neutral-100'
@@ -625,13 +625,13 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
 
                             {/* Optional Notes Preview */}
                             {task.notes && task.notes.trim() && (
-                              <p className="mt-1.5 line-clamp-2 pl-5 text-xs text-neutral-500 dark:text-neutral-400">
+                              <p className="mt-1 line-clamp-2 pl-5 text-xs text-neutral-500 dark:text-neutral-400">
                                 {task.notes}
                               </p>
                             )}
 
                             {/* Card Footer Metadata */}
-                            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200/60 pt-2 text-xs text-neutral-500 dark:border-neutral-800/80 dark:text-neutral-400">
+                            <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5 border-t border-neutral-200/50 pt-1.5 text-[11px] text-neutral-500 dark:border-neutral-800/70 dark:text-neutral-400">
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <span className={priorityTextColor(task.priority)}>
                                   {task.priority}
@@ -668,7 +668,7 @@ export const TaskDatabase: React.FC<TaskDatabaseProps> = ({
                 <button
                   type="button"
                   onClick={() => createTask(columnStatus)}
-                  className="mt-2.5 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-700 dark:hover:bg-neutral-800/70 dark:hover:text-neutral-200"
+                  className="mt-1.5 flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs font-medium text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800/70 dark:hover:text-neutral-200"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   <span>New task</span>

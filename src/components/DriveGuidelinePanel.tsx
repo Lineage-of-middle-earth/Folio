@@ -196,7 +196,7 @@ export const DriveGuidelinePanel: React.FC<DriveGuidelinePanelProps> = ({
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     defaultProjectId || projects[0]?.id || ''
   );
-  const [template, setTemplate] = useState<OrganizedDocTemplate>('spec');
+  const [template, setTemplate] = useState<OrganizedDocTemplate>('blank');
 
   const handleCopy = async (key: string, text: string) => {
     try {

@@ -610,7 +610,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
   return (
     <div className="space-y-1">
       {/* Subtle Notion Shortcut Hint Bar */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 pl-12 text-[11px] text-neutral-400 dark:text-neutral-500">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-400 dark:text-neutral-500">
         <span>
           Type <kbd className="rounded bg-neutral-100 px-1 py-0.5 font-mono text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">/</kbd> for commands, or Markdown shortcuts:{' '}
           <code className="font-mono">#</code> H1 · <code className="font-mono">##</code> H2 · <code className="font-mono">[]</code> To-do · <code className="font-mono">-</code> List · <code className="font-mono">&gt;</code> Quote
@@ -665,15 +665,15 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
                 }
               }}
               onDrop={() => handleDropReorder(block.id)}
-              className={`group relative flex items-start gap-1.5 rounded-md transition-colors ${
+              className={`group relative flex items-start rounded-md transition-colors ${
                 isDragOver
                   ? 'bg-blue-50/50 dark:bg-blue-950/20'
                   : ''
               }`}
             >
-              {/* True Notion Left Gutter: ONLY [+] and [⋮⋮] Six-Dot Grip Handle */}
+              {/* True Notion Left Gutter: ONLY [+] and [⋮⋮] Six-Dot Grip Handle in negative left margin */}
               <div
-                className={`mt-1 flex w-11 shrink-0 select-none items-center justify-end gap-0.5 transition-opacity duration-150 ${
+                className={`absolute -left-11 top-1 flex w-10 select-none items-center justify-end gap-0.5 pr-1 transition-opacity duration-150 ${
                   isMenuOpen
                     ? 'opacity-100'
                     : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
@@ -1082,7 +1082,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
         })}
 
         {/* Quiet click-to-append area below blocks */}
-        <div className="ml-12 mt-1 flex flex-wrap items-center gap-2 pt-1">
+        <div className="-ml-2 mt-1 flex flex-wrap items-center gap-2 pt-1">
           <button
             type="button"
             onClick={() => {
